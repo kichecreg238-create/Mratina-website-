@@ -1,0 +1,15 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-serif: "Playfair Display", ui-serif, Georgia, Cambria, "Times New Roman", Times, serif;
+}
+
+@layer base {
+  html, body {
+    @apply bg-[#050505] text-[#e0e0e0] h-full m-0 antialiased;
+  }
+  #root {
+    @apply h-full;
+  }
+}
