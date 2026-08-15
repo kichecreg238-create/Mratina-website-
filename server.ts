@@ -5,7 +5,7 @@ import { requireAuth, requireRole, AuthRequest } from "./src/middleware/auth.ts"
 import { getOrCreateUser, getUserByUid } from "./src/db/users.ts";
 import { getActiveProducts, createOrder } from "./src/db/commerce.ts";
 import { db } from "./src/db/index.ts";
-import { orders, products, variants, users, orderItems, reviews } from "./src/db/schema.ts";
+import { orders, products, variants, users, orderItems, reviews, deliveryZones } from "./src/db/schema.ts";
 import { eq, desc, inArray } from "drizzle-orm";
 
 async function startServer() {
