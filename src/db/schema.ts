@@ -34,6 +34,17 @@ export const variants = pgTable('variants', {
   isActive: boolean('is_active').default(true).notNull(),
 });
 
+// Delivery Zones
+export const deliveryZones = pgTable('delivery_zones', {
+  id: serial('id').primaryKey(),
+  name: text('name').notNull().unique(),
+  fee: decimal('fee', { precision: 10, scale: 2 }).notNull(),
+  isActive: boolean('is_active').default(true).notNull(),
+  isAcceptingOrders: boolean('is_accepting_orders').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
 // Orders
 export const orders = pgTable('orders', {
   id: serial('id').primaryKey(),
@@ -43,7 +54,8 @@ export const orders = pgTable('orders', {
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
   deliveryFee: decimal('delivery_fee', { precision: 10, scale: 2 }).notNull(),
   deliveryAddress: text('delivery_address').notNull(),
-  deliveryZone: text('delivery_zone'), // e.g., 'Nairobi CBD', 'Westlands'
+  landmark: text('landmark'),
+  deliveryZone: text('delivery_zone'), // We'll store the name to preserve history, or foreign key. String is fine for historical immutability.
   deliveryInstructions: text('delivery_instructions'),
   paymentState: text('payment_state').notNull().default('INITIATED'), // INITIATED, PENDING, SUCCESS, FAILED, REFUNDED
   createdAt: timestamp('created_at').defaultNow(),

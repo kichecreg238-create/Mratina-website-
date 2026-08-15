@@ -13,24 +13,50 @@ export const CartSidebar = () => {
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
   
+  // Delivery Zones & Serviceability State
+  const [availableZones, setAvailableZones] = useState<any[]>([]);
+  const [fetchingZones, setFetchingZones] = useState(true);
+
   // Form State
   const [address, setAddress] = useState('');
+  const [landmark, setLandmark] = useState('');
   const [instructions, setInstructions] = useState('');
   const [phone, setPhone] = useState('');
-  const [zone, setZone] = useState('Nairobi CBD');
+  const [zoneId, setZoneId] = useState<string>('');
+  
+  const [authoritativeDeliveryFee, setAuthoritativeDeliveryFee] = useState<number>(0);
 
   const total = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-  
-  const deliveryZones: Record<string, number> = {
-    'Nairobi CBD': 300,
-    'Westlands / Parklands': 500,
-    'Kilimani / Kileleshwa': 600,
-    'Karen / Langata': 1000,
-    'Kiambu / Thika Road': 1200
-  };
-  
-  const deliveryFee = deliveryZones[zone] || 500;
-  const finalTotal = total + deliveryFee;
+  const finalTotal = total + authoritativeDeliveryFee;
+
+  // Fetch Delivery Zones
+  React.useEffect(() => {
+    if (isOpen) {
+      setFetchingZones(true);
+      fetch('/api/delivery-zones')
+        .then(res => res.json())
+        .then(data => {
+          if (data.zones && data.zones.length > 0) {
+            setAvailableZones(data.zones);
+            setZoneId(data.zones[0].id.toString());
+            setAuthoritativeDeliveryFee(Number(data.zones[0].fee));
+          }
+          setFetchingZones(false);
+        })
+        .catch(err => {
+          console.error(err);
+          setFetchingZones(false);
+        });
+    }
+  }, [isOpen]);
+
+  // Update fee when zone changes
+  React.useEffect(() => {
+    const selectedZone = availableZones.find(z => z.id.toString() === zoneId);
+    if (selectedZone) {
+      setAuthoritativeDeliveryFee(Number(selectedZone.fee));
+    }
+  }, [zoneId, availableZones]);
 
   // Reset step when closed
   React.useEffect(() => {
@@ -54,7 +80,36 @@ export const CartSidebar = () => {
         setCheckoutError('Please provide a delivery address.');
         return;
       }
-      setStep('PAYMENT');
+      
+      // Authoritative Serviceability Validation
+      setCheckingOut(true);
+      try {
+        const res = await fetch('/api/serviceability/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ zoneId })
+        });
+        const data = await res.json();
+        
+        if (!res.ok || !data.isServiceable) {
+          setCheckoutError('This zone is outside our current service area.');
+          setCheckingOut(false);
+          return;
+        }
+        if (!data.isAcceptingOrders) {
+          setCheckoutError('This zone is currently at delivery capacity. Please try again later.');
+          setCheckingOut(false);
+          return;
+        }
+        
+        // Update authoritative fee just to be sure
+        setAuthoritativeDeliveryFee(Number(data.fee));
+        setStep('PAYMENT');
+      } catch (err) {
+        setCheckoutError('Failed to verify serviceability. Please check your connection.');
+      } finally {
+        setCheckingOut(false);
+      }
     }
   };
 
@@ -79,8 +134,8 @@ export const CartSidebar = () => {
         body: JSON.stringify({
           items: items.map(i => ({ variantId: i.variantId, quantity: i.quantity, expectedPrice: i.price })),
           deliveryAddress: address,
-          deliveryZone: zone,
-          deliveryFee,
+          landmark,
+          deliveryZoneId: zoneId,
           deliveryInstructions: instructions
         })
       });
@@ -200,24 +255,41 @@ export const CartSidebar = () => {
 
               <div>
                 <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Delivery Zone *</label>
-                <select 
-                  value={zone}
-                  onChange={(e) => setZone(e.target.value)}
-                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
-                >
-                  {Object.keys(deliveryZones).map(z => (
-                    <option key={z} value={z}>{z} - KES {deliveryZones[z]}</option>
-                  ))}
-                </select>
+                {fetchingZones ? (
+                  <div className="w-full bg-[#111] border border-white/10 text-white/50 p-3 text-sm flex items-center justify-center">
+                    Loading zones...
+                  </div>
+                ) : (
+                  <select 
+                    value={zoneId}
+                    onChange={(e) => setZoneId(e.target.value)}
+                    className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
+                  >
+                    {availableZones.map(z => (
+                      <option key={z.id} value={z.id}>{z.name} - KES {Number(z.fee)}</option>
+                    ))}
+                  </select>
+                )}
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Location / Landmark *</label>
+                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Location / Address *</label>
                 <input 
                   type="text" 
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
                   placeholder="e.g. 5th Floor, Kibo Tower"
+                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
+                />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Landmark</label>
+                <input 
+                  type="text" 
+                  value={landmark}
+                  onChange={(e) => setLandmark(e.target.value)}
+                  placeholder="e.g. Opposite the red gate"
                   className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
                 />
               </div>
@@ -235,8 +307,8 @@ export const CartSidebar = () => {
               <div className="p-4 bg-white/5 border border-white/10 flex items-start gap-3">
                  <MapPin size={16} className="text-[#c5a059] shrink-0 mt-0.5" />
                  <div>
-                   <span className="block text-xs text-white mb-1">{zone} Delivery</span>
-                   <span className="block text-[10px] text-white/50 leading-relaxed">Delivery fee is KES {deliveryFee}. Our concierge will contact you upon arrival.</span>
+                   <span className="block text-xs text-white mb-1">Zone Delivery</span>
+                   <span className="block text-[10px] text-white/50 leading-relaxed">Delivery fee is KES {authoritativeDeliveryFee}. Our concierge will contact you upon arrival.</span>
                  </div>
               </div>
             </div>
@@ -286,7 +358,7 @@ export const CartSidebar = () => {
                 </div>
                 <div className="flex justify-between mb-6">
                   <span className="text-xs text-white/50 uppercase tracking-widest">Concierge Delivery</span>
-                  <span className="text-sm text-[#c5a059]">KES {deliveryFee.toLocaleString()}</span>
+                  <span className="text-sm text-[#c5a059]">KES {authoritativeDeliveryFee.toLocaleString()}</span>
                 </div>
               </>
             )}

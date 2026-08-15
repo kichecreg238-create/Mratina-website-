@@ -64,8 +64,8 @@ async function startServer() {
   // Create order (Customer)
   app.post("/api/orders", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const { items, deliveryAddress, deliveryZone, deliveryInstructions } = req.body;
-      if (!items || !items.length || !deliveryAddress || !deliveryZone) {
+      const { items, deliveryAddress, deliveryZoneId, deliveryInstructions, landmark } = req.body;
+      if (!items || !items.length || !deliveryAddress || !deliveryZoneId) {
         return res.status(400).json({ error: "Missing required fields" });
       }
 
@@ -74,11 +74,49 @@ async function startServer() {
         return res.status(404).json({ error: "User not found in DB" });
       }
 
-      const order = await createOrder(user.id, items, deliveryAddress, deliveryZone, deliveryInstructions);
+      const order = await createOrder(user.id, items, deliveryAddress, Number(deliveryZoneId), deliveryInstructions, landmark);
       res.json({ success: true, order });
     } catch (error: any) {
       console.error("Order creation failed:", error);
       res.status(400).json({ error: error.message || "Failed to create order" });
+    }
+  });
+
+  // Get active delivery zones (Public)
+  app.get("/api/delivery-zones", async (req, res) => {
+    try {
+      const activeZones = await db.select().from(deliveryZones).where(eq(deliveryZones.isActive, true));
+      res.json({ zones: activeZones });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch delivery zones" });
+    }
+  });
+
+  // Serviceability Check (Public/Customer)
+  app.post("/api/serviceability/check", async (req, res) => {
+    try {
+      const { zoneId } = req.body;
+      if (!zoneId) {
+        return res.status(400).json({ error: "Missing zoneId" });
+      }
+      
+      const zoneRes = await db.select().from(deliveryZones).where(eq(deliveryZones.id, Number(zoneId)));
+      const zone = zoneRes[0];
+      
+      if (!zone) {
+        return res.status(404).json({ error: "Delivery zone not found" });
+      }
+      
+      res.json({
+        isServiceable: zone.isActive,
+        fee: zone.fee,
+        isAcceptingOrders: zone.isAcceptingOrders,
+        zoneName: zone.name
+      });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Serviceability check failed" });
     }
   });
 
@@ -112,6 +150,88 @@ async function startServer() {
       res.json({ orders: ordersWithItems });
     } catch (error: any) {
       res.status(500).json({ error: "Failed to fetch order history" });
+    }
+  });
+
+  // --- ADMIN DELIVERY ZONES ---
+  app.get("/api/admin/delivery-zones", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const allZones = await db.select().from(deliveryZones).orderBy(deliveryZones.id);
+      res.json({ zones: allZones });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch delivery zones" });
+    }
+  });
+
+  app.post("/api/admin/delivery-zones", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { name, fee, isActive, isAcceptingOrders } = req.body;
+      
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Zone name is required" });
+      }
+      
+      const numericFee = Number(fee);
+      if (isNaN(numericFee) || numericFee < 0) {
+        return res.status(400).json({ error: "Fee must be a valid non-negative number" });
+      }
+      
+      const [newZone] = await db.insert(deliveryZones).values({
+        name: name.trim(),
+        fee: numericFee.toString(),
+        isActive: Boolean(isActive),
+        isAcceptingOrders: Boolean(isAcceptingOrders)
+      }).returning();
+      
+      res.json({ success: true, zone: newZone });
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === '23505') { // Postgres unique violation
+        return res.status(400).json({ error: "A zone with this name already exists" });
+      }
+      res.status(500).json({ error: "Failed to create delivery zone" });
+    }
+  });
+
+  app.put("/api/admin/delivery-zones/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const zoneId = parseInt(req.params.id);
+      if (isNaN(zoneId)) return res.status(400).json({ error: "Invalid zone ID" });
+      
+      const { name, fee, isActive, isAcceptingOrders } = req.body;
+      
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Zone name is required" });
+      }
+      
+      const numericFee = Number(fee);
+      if (isNaN(numericFee) || numericFee < 0) {
+        return res.status(400).json({ error: "Fee must be a valid non-negative number" });
+      }
+      
+      const [updatedZone] = await db.update(deliveryZones)
+        .set({
+          name: name.trim(),
+          fee: numericFee.toString(),
+          isActive: Boolean(isActive),
+          isAcceptingOrders: Boolean(isAcceptingOrders),
+          updatedAt: new Date()
+        })
+        .where(eq(deliveryZones.id, zoneId))
+        .returning();
+        
+      if (!updatedZone) {
+        return res.status(404).json({ error: "Delivery zone not found" });
+      }
+      
+      res.json({ success: true, zone: updatedZone });
+    } catch (error: any) {
+      console.error(error);
+      if (error.code === '23505') {
+        return res.status(400).json({ error: "A zone with this name already exists" });
+      }
+      res.status(500).json({ error: "Failed to update delivery zone" });
     }
   });
 
@@ -212,12 +332,10 @@ async function startServer() {
       const [newProduct] = await db.insert(products).values({
         name: name.trim(),
         category,
-        brand: brand?.trim() || null,
         origin: origin?.trim() || null,
         abv: abv ? String(abv).trim() : null,
         description: description?.trim() || null,
         imageUrl: imageBase64 || null,
-        isCustomisable: Boolean(isCustomisable),
         isActive: true
       }).returning();
       

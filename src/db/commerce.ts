@@ -1,5 +1,5 @@
 import { db } from './index.ts';
-import { products, variants, orders, orderItems } from './schema.ts';
+import { products, variants, orders, orderItems, deliveryZones } from './schema.ts';
 import { eq, inArray } from 'drizzle-orm';
 
 export async function getActiveProducts() {
@@ -17,18 +17,26 @@ export async function getActiveProducts() {
   }));
 }
 
-export async function createOrder(userId: number, items: { variantId: number; quantity: number; expectedPrice?: number }[], deliveryAddress: string, deliveryZone: string, deliveryInstructions?: string) {
+export async function createOrder(userId: number, items: { variantId: number; quantity: number; expectedPrice?: number }[], deliveryAddress: string, deliveryZoneId: number, deliveryInstructions?: string, landmark?: string) {
   if (!items || items.length === 0) throw new Error("Order must contain at least one item.");
 
-  // Clean boundary for delivery calculation (to be expanded in next phase)
-  // We ignore any client-submitted delivery fee and use this authoritative function.
-  const calculateDeliveryFee = (zone: string) => {
-    return 250; // Placeholder authoritative delivery fee
-  };
-  
-  const authoritativeDeliveryFee = calculateDeliveryFee(deliveryZone);
-
   return await db.transaction(async (tx) => {
+    // 1. Authoritative Serviceability Check
+    const zoneRes = await tx.select().from(deliveryZones).where(eq(deliveryZones.id, deliveryZoneId));
+    const zone = zoneRes[0];
+    
+    if (!zone) {
+      throw new Error("Invalid delivery zone selected.");
+    }
+    if (!zone.isActive) {
+      throw new Error(`Delivery zone '${zone.name}' is not currently active or serviceable.`);
+    }
+    if (!zone.isAcceptingOrders) {
+      throw new Error(`Delivery zone '${zone.name}' is currently at capacity and not accepting orders.`);
+    }
+
+    const authoritativeDeliveryFee = Number(zone.fee);
+
     let subtotal = 0;
     const itemsToInsert = [];
     
@@ -65,7 +73,6 @@ export async function createOrder(userId: number, items: { variantId: number; qu
       });
       
       // Decrement stock (atomic check via where clause)
-      // We rely on standard transaction isolation, but can also enforce at row level
       await tx.update(variants)
         .set({ stock: variant.stock - item.quantity })
         .where(eq(variants.id, variant.id));
@@ -80,7 +87,8 @@ export async function createOrder(userId: number, items: { variantId: number; qu
       totalAmount: grandTotal.toString(), // Base total
       deliveryFee: authoritativeDeliveryFee.toString(),
       deliveryAddress,
-      deliveryZone,
+      landmark,
+      deliveryZone: zone.name, // Store the name for history so it doesn't change if zone is renamed
       deliveryInstructions,
       paymentState: 'INITIATED',
     }).returning();
