@@ -429,25 +429,35 @@ async function startServer() {
 
       // If updating delivererId (Admin only)
       if (delivererId !== undefined && isAdmin) {
+        if (delivererId !== null && delivererId !== "") {
+          const delivererRes = await db.select().from(users).where(eq(users.id, parseInt(delivererId)));
+          const deliverer = delivererRes[0];
+          if (!deliverer || deliverer.role !== 'DELIVERER') {
+            return res.status(400).json({ error: "Invalid deliverer assigned. Must be a valid user with DELIVERER role." });
+          }
+        }
+        
+        const finalDelivererId = delivererId ? parseInt(delivererId) : null;
+        
         if (!delivery) {
            const [newDel] = await db.insert(deliveries).values({
              orderId,
-             delivererId: delivererId || null,
-             status: delivererId ? 'ASSIGNED' : 'UNASSIGNED',
-             assignedAt: delivererId ? new Date() : null,
+             delivererId: finalDelivererId,
+             status: finalDelivererId ? 'ASSIGNED' : 'UNASSIGNED',
+             assignedAt: finalDelivererId ? new Date() : null,
            }).returning();
            delivery = newDel;
         } else {
            const [updatedDel] = await db.update(deliveries).set({
-             delivererId: delivererId || null,
-             status: delivererId ? 'ASSIGNED' : 'UNASSIGNED',
-             assignedAt: delivererId ? new Date() : null,
+             delivererId: finalDelivererId,
+             status: finalDelivererId ? 'ASSIGNED' : 'UNASSIGNED',
+             assignedAt: finalDelivererId ? new Date() : null,
              updatedAt: new Date()
            }).where(eq(deliveries.id, delivery.id)).returning();
            delivery = updatedDel;
         }
         // Sync to order for backwards compatibility 
-        await db.update(orders).set({ delivererId: delivererId || null }).where(eq(orders.id, orderId));
+        await db.update(orders).set({ delivererId: finalDelivererId }).where(eq(orders.id, orderId));
       }
 
       // If updating status
