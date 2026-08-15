@@ -64,7 +64,7 @@ async function startServer() {
   // Create order (Customer)
   app.post("/api/orders", requireAuth, async (req: AuthRequest, res) => {
     try {
-      const { items, deliveryAddress, deliveryZone, deliveryFee, deliveryInstructions } = req.body;
+      const { items, deliveryAddress, deliveryZone, deliveryInstructions } = req.body;
       if (!items || !items.length || !deliveryAddress || !deliveryZone) {
         return res.status(400).json({ error: "Missing required fields" });
       }
@@ -74,11 +74,11 @@ async function startServer() {
         return res.status(404).json({ error: "User not found in DB" });
       }
 
-      const order = await createOrder(user.id, items, deliveryAddress, deliveryZone, deliveryFee || 500, deliveryInstructions);
+      const order = await createOrder(user.id, items, deliveryAddress, deliveryZone, deliveryInstructions);
       res.json({ success: true, order });
     } catch (error: any) {
       console.error("Order creation failed:", error);
-      res.status(500).json({ error: error.message || "Failed to create order" });
+      res.status(400).json({ error: error.message || "Failed to create order" });
     }
   });
 
@@ -196,15 +196,28 @@ async function startServer() {
     try {
       const { name, category, brand, origin, abv, description, imageBase64, isCustomisable } = req.body;
       
+      // Validation
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Product name is required" });
+      }
+      if (name.length > 200) {
+        return res.status(400).json({ error: "Product name is too long" });
+      }
+      
+      const validCategories = ["WINE", "BEER", "SPIRITS", "MIXER", "OTHER"];
+      if (!category || !validCategories.includes(category)) {
+        return res.status(400).json({ error: "Invalid product category" });
+      }
+      
       const [newProduct] = await db.insert(products).values({
-        name,
+        name: name.trim(),
         category,
-        brand: brand || null,
-        origin: origin || null,
-        abv: abv ? String(abv) : null,
-        description: description || null,
+        brand: brand?.trim() || null,
+        origin: origin?.trim() || null,
+        abv: abv ? String(abv).trim() : null,
+        description: description?.trim() || null,
         imageUrl: imageBase64 || null,
-        isCustomisable: !!isCustomisable,
+        isCustomisable: Boolean(isCustomisable),
         isActive: true
       }).returning();
       
@@ -218,14 +231,42 @@ async function startServer() {
   app.post("/api/admin/products/:id/variants", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
       const productId = parseInt(req.params.id);
+      if (isNaN(productId)) {
+        return res.status(400).json({ error: "Invalid product ID" });
+      }
+
       const { volume, price, stock, packaging } = req.body;
       
+      // Validation
+      if (!volume || typeof volume !== 'string' || volume.trim().length === 0) {
+        return res.status(400).json({ error: "Volume is required" });
+      }
+      if (!packaging || typeof packaging !== 'string' || packaging.trim().length === 0) {
+        return res.status(400).json({ error: "Packaging type is required" });
+      }
+      
+      const numericPrice = Number(price);
+      if (isNaN(numericPrice) || numericPrice <= 0) {
+        return res.status(400).json({ error: "Price must be a valid number greater than zero" });
+      }
+      
+      const numericStock = parseInt(stock);
+      if (isNaN(numericStock) || numericStock < 0) {
+        return res.status(400).json({ error: "Stock must be a valid non-negative integer" });
+      }
+
+      // Check if product exists
+      const productRes = await db.select().from(products).where(eq(products.id, productId));
+      if (productRes.length === 0) {
+        return res.status(404).json({ error: "Parent product not found" });
+      }
+
       const [newVariant] = await db.insert(variants).values({
         productId,
-        volume,
-        price: String(price),
-        stock: parseInt(stock) || 0,
-        packaging: packaging || null,
+        volume: volume.trim(),
+        price: numericPrice.toString(),
+        stock: numericStock,
+        packaging: packaging.trim(),
         isActive: true
       }).returning();
       

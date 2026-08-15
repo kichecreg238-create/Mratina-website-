@@ -11,6 +11,7 @@ export const CartSidebar = () => {
   const { user, signIn } = useAuthStore();
   const [step, setStep] = useState<CheckoutStep>('CART');
   const [checkingOut, setCheckingOut] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
   
   // Form State
   const [address, setAddress] = useState('');
@@ -34,11 +35,15 @@ export const CartSidebar = () => {
   // Reset step when closed
   React.useEffect(() => {
     if (!isOpen) {
-      setTimeout(() => setStep('CART'), 300);
+      setTimeout(() => {
+        setStep('CART');
+        setCheckoutError(null);
+      }, 300);
     }
   }, [isOpen]);
 
   const handleNextStep = async () => {
+    setCheckoutError(null);
     if (!user) {
       await signIn();
       return;
@@ -46,7 +51,7 @@ export const CartSidebar = () => {
     if (step === 'CART') setStep('DELIVERY');
     else if (step === 'DELIVERY') {
       if (!address.trim()) {
-        alert('Please provide a delivery address.');
+        setCheckoutError('Please provide a delivery address.');
         return;
       }
       setStep('PAYMENT');
@@ -54,8 +59,9 @@ export const CartSidebar = () => {
   };
 
   const handleCheckout = async () => {
+    setCheckoutError(null);
     if (!phone.trim()) {
-      alert('Please provide a phone number for M-Pesa.');
+      setCheckoutError('Please provide a phone number for M-Pesa.');
       return;
     }
     
@@ -71,7 +77,7 @@ export const CartSidebar = () => {
           'Authorization': `Bearer ${token}`
         },
         body: JSON.stringify({
-          items: items.map(i => ({ variantId: i.variantId, quantity: i.quantity })),
+          items: items.map(i => ({ variantId: i.variantId, quantity: i.quantity, expectedPrice: i.price })),
           deliveryAddress: address,
           deliveryZone: zone,
           deliveryFee,
@@ -81,7 +87,8 @@ export const CartSidebar = () => {
       
       const data = await res.json();
       if (!data.success) {
-        alert('Checkout failed: ' + data.error);
+        setCheckoutError(data.error || 'Failed to create order. Please check your cart.');
+        setStep('CART'); // Send them back to cart to see what they might need to change
         setCheckingOut(false);
         return;
       }
@@ -111,7 +118,7 @@ export const CartSidebar = () => {
       useCartStore.getState().clearCart();
       toggleCart();
     } catch (e) {
-      alert('Checkout error.');
+      setCheckoutError('A network error occurred. Please try again.');
     } finally {
       setCheckingOut(false);
     }
@@ -288,6 +295,12 @@ export const CartSidebar = () => {
               <div className="flex justify-between mb-6 pt-2">
                 <span className="text-xs text-white/80 uppercase tracking-widest font-bold">Total to Pay</span>
                 <span className="text-lg text-[#c5a059] font-serif">KES {finalTotal.toLocaleString()}</span>
+              </div>
+            )}
+
+            {checkoutError && (
+              <div className="mb-4 p-3 bg-red-950/50 border border-red-500/30 text-red-200 text-[10px] uppercase tracking-wider leading-relaxed">
+                {checkoutError}
               </div>
             )}
 
