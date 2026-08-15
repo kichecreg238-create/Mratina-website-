@@ -16,6 +16,11 @@ export const AdminDashboard = () => {
   const [fetching, setFetching] = useState(true);
   const [updating, setUpdating] = useState<number | null>(null);
 
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [showVariantModalFor, setShowVariantModalFor] = useState<number | null>(null);
+  const [newProduct, setNewProduct] = useState({ name: '', category: 'WINE', brand: '', origin: '', abv: '', description: '', imageBase64: '', isCustomisable: false });
+  const [newVariant, setNewVariant] = useState({ volume: '750ml', price: '', stock: 0, packaging: 'Bottle' });
+
   useEffect(() => {
     if (!user || (dbUser && dbUser.role !== 'ADMIN')) {
       setFetching(false);
@@ -104,6 +109,52 @@ export const AdminDashboard = () => {
       })));
     } catch (e) {
       alert('Failed to update stock');
+    }
+  };
+
+  const createProduct = async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/admin/products`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(newProduct)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProducts([{ ...data.product, variants: [] }, ...products]);
+        setShowProductModal(false);
+        setNewProduct({ name: '', category: 'WINE', brand: '', origin: '', abv: '', description: '', imageBase64: '', isCustomisable: false });
+      }
+    } catch (e) {
+      alert('Failed to create product');
+    }
+  };
+
+  const createVariant = async () => {
+    if (!user || !showVariantModalFor) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/admin/products/${showVariantModalFor}/variants`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify(newVariant)
+      });
+      const data = await res.json();
+      if (data.success) {
+        setProducts(products.map(p => p.id === showVariantModalFor ? { ...p, variants: [...p.variants, data.variant] } : p));
+        setShowVariantModalFor(null);
+        setNewVariant({ volume: '750ml', price: '', stock: 0, packaging: 'Bottle' });
+      }
+    } catch (e) {
+      alert('Failed to create variant');
     }
   };
 
@@ -251,7 +302,10 @@ export const AdminDashboard = () => {
               <h3 className="text-lg font-serif mb-1">Product Catalogue</h3>
               <p className="text-xs text-white/50">Manage inventory, variants, and product listings.</p>
             </div>
-            <button className="px-4 py-2 bg-[#c5a059] text-black text-[10px] uppercase tracking-widest font-bold hover:bg-[#d4b271] transition-colors">
+            <button 
+              onClick={() => setShowProductModal(true)}
+              className="px-4 py-2 bg-[#c5a059] text-black text-[10px] uppercase tracking-widest font-bold hover:bg-[#d4b271] transition-colors"
+            >
               + New Product
             </button>
           </div>
@@ -263,7 +317,10 @@ export const AdminDashboard = () => {
                   <h3 className="text-lg font-serif mb-2">{product.name}</h3>
                   <p className="text-xs text-white/50 uppercase tracking-widest">{product.category} • {product.abv}</p>
                 </div>
-                <button className="text-[10px] uppercase tracking-widest text-white/40 hover:text-white transition-colors border border-white/10 px-3 py-1">
+                <button 
+                  onClick={() => setShowVariantModalFor(product.id)}
+                  className="text-[10px] uppercase tracking-widest text-white/40 hover:text-white transition-colors border border-white/10 px-3 py-1"
+                >
                   + Add Variant
                 </button>
               </div>
@@ -343,6 +400,103 @@ export const AdminDashboard = () => {
               No users found.
             </div>
           )}
+        </div>
+      )}
+
+      {showProductModal && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-[#111] border border-white/10 p-8 w-full max-w-xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-serif">New Product</h3>
+              <button onClick={() => setShowProductModal(false)} className="text-white/50 hover:text-white">&times;</button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Name</label>
+                <input type="text" value={newProduct.name} onChange={e => setNewProduct({...newProduct, name: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Category</label>
+                  <select value={newProduct.category} onChange={e => setNewProduct({...newProduct, category: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none">
+                    <option value="WINE">Wine</option>
+                    <option value="BEER">Beer</option>
+                    <option value="SPIRITS">Spirits</option>
+                    <option value="MIXER">Mixer</option>
+                    <option value="OTHER">Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Brand</label>
+                  <input type="text" value={newProduct.brand} onChange={e => setNewProduct({...newProduct, brand: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Origin</label>
+                  <input type="text" value={newProduct.origin} onChange={e => setNewProduct({...newProduct, origin: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+                </div>
+                <div>
+                  <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">ABV (%)</label>
+                  <input type="text" value={newProduct.abv} onChange={e => setNewProduct({...newProduct, abv: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Description</label>
+                <textarea rows={3} value={newProduct.description} onChange={e => setNewProduct({...newProduct, description: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none"></textarea>
+              </div>
+
+              <div className="flex items-center gap-2 mt-2">
+                <input type="checkbox" id="customisable" checked={newProduct.isCustomisable} onChange={e => setNewProduct({...newProduct, isCustomisable: e.target.checked})} className="accent-[#c5a059]" />
+                <label htmlFor="customisable" className="text-sm text-white/80">Allow customization / engraving</label>
+              </div>
+
+              <button onClick={createProduct} className="w-full py-3 mt-4 bg-[#c5a059] text-black text-[10px] uppercase tracking-widest font-bold hover:bg-[#d4b271] transition-colors">
+                Create Product
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showVariantModalFor !== null && (
+        <div className="fixed inset-0 bg-black/80 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
+          <div className="bg-[#111] border border-white/10 p-8 w-full max-w-md">
+            <div className="flex justify-between items-center mb-6">
+              <h3 className="text-xl font-serif">Add Variant</h3>
+              <button onClick={() => setShowVariantModalFor(null)} className="text-white/50 hover:text-white">&times;</button>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Volume (e.g. 750ml, 1L)</label>
+                <input type="text" value={newVariant.volume} onChange={e => setNewVariant({...newVariant, volume: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+              </div>
+              
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Price (KES)</label>
+                <input type="number" value={newVariant.price} onChange={e => setNewVariant({...newVariant, price: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Initial Stock</label>
+                <input type="number" value={newVariant.stock} onChange={e => setNewVariant({...newVariant, stock: parseInt(e.target.value) || 0})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+              </div>
+
+              <div>
+                <label className="block text-[10px] uppercase tracking-widest text-white/50 mb-1">Packaging (e.g. Bottle, Can, Keg)</label>
+                <input type="text" value={newVariant.packaging} onChange={e => setNewVariant({...newVariant, packaging: e.target.value})} className="w-full bg-white/5 border border-white/10 p-3 text-sm text-white focus:border-[#c5a059] outline-none" />
+              </div>
+
+              <button onClick={createVariant} className="w-full py-3 mt-4 bg-[#c5a059] text-black text-[10px] uppercase tracking-widest font-bold hover:bg-[#d4b271] transition-colors">
+                Add Variant
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

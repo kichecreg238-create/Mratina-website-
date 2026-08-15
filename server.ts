@@ -192,6 +192,50 @@ async function startServer() {
     }
   });
 
+  app.post("/api/admin/products", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { name, category, brand, origin, abv, description, imageBase64, isCustomisable } = req.body;
+      
+      const [newProduct] = await db.insert(products).values({
+        name,
+        category,
+        brand: brand || null,
+        origin: origin || null,
+        abv: abv ? String(abv) : null,
+        description: description || null,
+        imageUrl: imageBase64 || null,
+        isCustomisable: !!isCustomisable,
+        isActive: true
+      }).returning();
+      
+      res.json({ success: true, product: newProduct });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to create product" });
+    }
+  });
+
+  app.post("/api/admin/products/:id/variants", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      const { volume, price, stock, packaging } = req.body;
+      
+      const [newVariant] = await db.insert(variants).values({
+        productId,
+        volume,
+        price: String(price),
+        stock: parseInt(stock) || 0,
+        packaging: packaging || null,
+        isActive: true
+      }).returning();
+      
+      res.json({ success: true, variant: newVariant });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to create variant" });
+    }
+  });
+
   app.post("/api/admin/variants/:id/stock", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
       const variantId = parseInt(req.params.id);
