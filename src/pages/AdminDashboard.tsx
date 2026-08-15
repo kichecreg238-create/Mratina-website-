@@ -89,7 +89,12 @@ export const AdminDashboard = () => {
         body: JSON.stringify(body)
       });
       
-      setOrders(orders.map(o => o.id === orderId ? { ...o, status, delivererId: delivererId || o.delivererId } : o));
+      setOrders(orders.map(o => o.id === orderId ? { 
+        ...o, 
+        status, 
+        delivererId: delivererId || o.delivererId,
+        delivery: { ...(o.delivery || {}), status }
+      } : o));
     } catch (e) {
       alert('Failed to update status');
     } finally {
@@ -299,7 +304,10 @@ export const AdminDashboard = () => {
                       <span className={order.paymentState === 'SUCCESS' ? 'text-green-500' : 'text-yellow-500'}>{order.paymentState}</span>
                     </td>
                     <td className="py-4 px-4 min-w-[150px]">
-                      <span className="text-white/80 bg-white/10 px-2 py-1 text-[10px] tracking-wider uppercase rounded-sm border border-white/5">{order.status}</span>
+                      <div className="flex flex-col gap-1">
+                        <span className="text-white/80 bg-white/10 px-2 py-1 text-[10px] tracking-wider uppercase rounded-sm border border-white/5 inline-block w-fit">O: {order.status}</span>
+                        <span className="text-[#c5a059] bg-[#c5a059]/10 px-2 py-1 text-[10px] tracking-wider uppercase rounded-sm border border-[#c5a059]/20 inline-block w-fit">D: {order.delivery?.status || 'UNASSIGNED'}</span>
+                      </div>
                     </td>
                     <td className="py-4 px-4 min-w-[150px]">
                       <select 
@@ -318,15 +326,17 @@ export const AdminDashboard = () => {
                       <select 
                         disabled={updating === order.id}
                         className="bg-[#111] border border-white/20 text-white text-[10px] uppercase tracking-widest p-2 cursor-pointer outline-none hover:border-[#c5a059] transition-colors focus:border-[#c5a059]"
-                        value={order.status}
+                        value={order.delivery?.status || order.status}
                         onChange={(e) => updateStatus(order.id, e.target.value)}
                       >
-                        <option value="PENDING">Pending</option>
-                        <option value="CONFIRMED">Confirmed</option>
+                        <option value="UNASSIGNED">Unassigned</option>
                         <option value="ASSIGNED">Assigned</option>
+                        <option value="ACCEPTED">Accepted</option>
                         <option value="PICKUP_READY">Pickup Ready</option>
+                        <option value="PICKED_UP">Picked Up</option>
                         <option value="OUT_FOR_DELIVERY">Out for Delivery</option>
                         <option value="DELIVERED">Delivered</option>
+                        <option value="FAILED">Failed</option>
                         <option value="CANCELLED">Cancelled</option>
                       </select>
                     </td>

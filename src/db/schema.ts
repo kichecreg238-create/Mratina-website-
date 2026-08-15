@@ -49,7 +49,8 @@ export const deliveryZones = pgTable('delivery_zones', {
 export const orders = pgTable('orders', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
-  delivererId: integer('deliverer_id').references(() => users.id), // Assigned deliverer
+  // Deprecating delivererId directly on order in favor of deliveries table, but keeping it for backward compatibility during transition
+  delivererId: integer('deliverer_id').references(() => users.id), 
   status: text('status').notNull().default('PENDING'), // PENDING, CONFIRMED, ASSIGNED, PICKUP_READY, OUT_FOR_DELIVERY, DELIVERED, FAILED, CANCELLED
   totalAmount: decimal('total_amount', { precision: 10, scale: 2 }).notNull(),
   deliveryFee: decimal('delivery_fee', { precision: 10, scale: 2 }).notNull(),
@@ -58,6 +59,28 @@ export const orders = pgTable('orders', {
   deliveryZone: text('delivery_zone'), // We'll store the name to preserve history, or foreign key. String is fine for historical immutability.
   deliveryInstructions: text('delivery_instructions'),
   paymentState: text('payment_state').notNull().default('INITIATED'), // INITIATED, PENDING, SUCCESS, FAILED, REFUNDED
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Deliveries
+export const deliveries = pgTable('deliveries', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id),
+  delivererId: integer('deliverer_id').references(() => users.id),
+  status: text('status').notNull().default('UNASSIGNED'), // UNASSIGNED, ASSIGNED, ACCEPTED, PICKUP_READY, PICKED_UP, OUT_FOR_DELIVERY, DELIVERED, FAILED, CANCELLED
+  assignedAt: timestamp('assigned_at'),
+  acceptedAt: timestamp('accepted_at'),
+  pickupReadyAt: timestamp('pickup_ready_at'),
+  pickedUpAt: timestamp('picked_up_at'),
+  outForDeliveryAt: timestamp('out_for_delivery_at'),
+  deliveredAt: timestamp('delivered_at'),
+  failedAt: timestamp('failed_at'),
+  cancelledAt: timestamp('cancelled_at'),
+  failureReason: text('failure_reason'),
+  latitude: decimal('latitude', { precision: 9, scale: 6 }),
+  longitude: decimal('longitude', { precision: 9, scale: 6 }),
+  locationSource: text('location_source'), // MANUAL, GPS, MAP_PIN
   createdAt: timestamp('created_at').defaultNow(),
   updatedAt: timestamp('updated_at').defaultNow(),
 });
@@ -111,6 +134,21 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     references: [users.id],
   }),
   items: many(orderItems),
+  delivery: one(deliveries, {
+    fields: [orders.id],
+    references: [deliveries.orderId]
+  }),
+}));
+
+export const deliveriesRelations = relations(deliveries, ({ one }) => ({
+  order: one(orders, {
+    fields: [deliveries.orderId],
+    references: [orders.id],
+  }),
+  deliverer: one(users, {
+    fields: [deliveries.delivererId],
+    references: [users.id],
+  }),
 }));
 
 export const orderItemsRelations = relations(orderItems, ({ one }) => ({

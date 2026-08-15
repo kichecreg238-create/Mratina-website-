@@ -1,5 +1,5 @@
 import { db } from './index.ts';
-import { products, variants, orders, orderItems, deliveryZones } from './schema.ts';
+import { products, variants, orders, orderItems, deliveryZones, deliveries } from './schema.ts';
 import { eq, inArray } from 'drizzle-orm';
 
 export async function getActiveProducts() {
@@ -102,6 +102,12 @@ export async function createOrder(userId: number, items: { variantId: number; qu
         ...item
       });
     }
+
+    // Initialize delivery record
+    await tx.insert(deliveries).values({
+      orderId: order.id,
+      status: 'UNASSIGNED',
+    });
     
     return order;
   });

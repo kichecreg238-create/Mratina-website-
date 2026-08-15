@@ -5,7 +5,7 @@ import { requireAuth, requireRole, AuthRequest } from "./src/middleware/auth.ts"
 import { getOrCreateUser, getUserByUid } from "./src/db/users.ts";
 import { getActiveProducts, createOrder } from "./src/db/commerce.ts";
 import { db } from "./src/db/index.ts";
-import { orders, products, variants, users, orderItems, reviews, deliveryZones } from "./src/db/schema.ts";
+import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries } from "./src/db/schema.ts";
 import { eq, desc, inArray } from "drizzle-orm";
 
 async function startServer() {
@@ -128,6 +128,7 @@ async function startServer() {
       
       const orderIds = userOrders.map(o => o.id);
       let items: any[] = [];
+      let deliveryRecords: any[] = [];
       if (orderIds.length > 0) {
         items = await db.select({
           orderId: orderItems.orderId,
@@ -140,15 +141,19 @@ async function startServer() {
         .leftJoin(variants, eq(orderItems.variantId, variants.id))
         .leftJoin(products, eq(variants.productId, products.id))
         .where(inArray(orderItems.orderId, orderIds));
+
+        deliveryRecords = await db.select().from(deliveries).where(inArray(deliveries.orderId, orderIds));
       }
 
       const ordersWithItems = userOrders.map(order => ({
         ...order,
-        items: items.filter(i => i.orderId === order.id)
+        items: items.filter(i => i.orderId === order.id),
+        delivery: deliveryRecords.find(d => d.orderId === order.id) || null
       }));
 
       res.json({ orders: ordersWithItems });
     } catch (error: any) {
+      console.error(error);
       res.status(500).json({ error: "Failed to fetch order history" });
     }
   });
@@ -242,6 +247,7 @@ async function startServer() {
       
       const orderIds = allOrders.map(o => o.id);
       let items: any[] = [];
+      let deliveryRecords: any[] = [];
       if (orderIds.length > 0) {
         items = await db.select({
           orderId: orderItems.orderId,
@@ -254,15 +260,19 @@ async function startServer() {
         .leftJoin(variants, eq(orderItems.variantId, variants.id))
         .leftJoin(products, eq(variants.productId, products.id))
         .where(inArray(orderItems.orderId, orderIds));
+
+        deliveryRecords = await db.select().from(deliveries).where(inArray(deliveries.orderId, orderIds));
       }
 
       const ordersWithItems = allOrders.map(order => ({
         ...order,
-        items: items.filter(i => i.orderId === order.id)
+        items: items.filter(i => i.orderId === order.id),
+        delivery: deliveryRecords.find(d => d.orderId === order.id) || null
       }));
 
       res.json({ orders: ordersWithItems });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: "Failed to fetch orders" });
     }
   });
@@ -410,15 +420,87 @@ async function startServer() {
     try {
       const orderId = parseInt(req.params.id);
       const { status, delivererId } = req.body;
-      
-      const updateData: any = { status, updatedAt: new Date() };
-      if (delivererId !== undefined) {
-        updateData.delivererId = delivererId;
+      const user = await getUserByUid(req.user!.uid);
+      const isAdmin = user.role === 'ADMIN';
+
+      // Load the delivery record
+      const deliveryRes = await db.select().from(deliveries).where(eq(deliveries.orderId, orderId));
+      let delivery = deliveryRes[0];
+
+      // If updating delivererId (Admin only)
+      if (delivererId !== undefined && isAdmin) {
+        if (!delivery) {
+           const [newDel] = await db.insert(deliveries).values({
+             orderId,
+             delivererId: delivererId || null,
+             status: delivererId ? 'ASSIGNED' : 'UNASSIGNED',
+             assignedAt: delivererId ? new Date() : null,
+           }).returning();
+           delivery = newDel;
+        } else {
+           const [updatedDel] = await db.update(deliveries).set({
+             delivererId: delivererId || null,
+             status: delivererId ? 'ASSIGNED' : 'UNASSIGNED',
+             assignedAt: delivererId ? new Date() : null,
+             updatedAt: new Date()
+           }).where(eq(deliveries.id, delivery.id)).returning();
+           delivery = updatedDel;
+        }
+        // Sync to order for backwards compatibility 
+        await db.update(orders).set({ delivererId: delivererId || null }).where(eq(orders.id, orderId));
+      }
+
+      // If updating status
+      if (status && delivery) {
+        // Enforce authorization for Deliverers
+        if (!isAdmin && delivery.delivererId !== user.id) {
+           return res.status(403).json({ error: "Not authorized to update this delivery" });
+        }
+
+        const validTransitions: Record<string, string[]> = {
+          'UNASSIGNED': ['ASSIGNED', 'CANCELLED'],
+          'ASSIGNED': ['ACCEPTED', 'UNASSIGNED', 'CANCELLED'],
+          'ACCEPTED': ['PICKUP_READY', 'CANCELLED', 'FAILED'],
+          'PICKUP_READY': ['PICKED_UP', 'CANCELLED', 'FAILED'],
+          'PICKED_UP': ['OUT_FOR_DELIVERY', 'FAILED'],
+          'OUT_FOR_DELIVERY': ['DELIVERED', 'FAILED'],
+          'DELIVERED': [],
+          'FAILED': [],
+          'CANCELLED': []
+        };
+
+        const currentState = delivery.status;
+        const isAllowed = isAdmin || (validTransitions[currentState] && validTransitions[currentState].includes(status));
+        
+        if (!isAllowed) {
+           return res.status(400).json({ error: `Invalid transition from ${currentState} to ${status}` });
+        }
+
+        const deliveryUpdates: any = { status, updatedAt: new Date() };
+        if (status === 'ACCEPTED') deliveryUpdates.acceptedAt = new Date();
+        if (status === 'PICKUP_READY') deliveryUpdates.pickupReadyAt = new Date();
+        if (status === 'PICKED_UP') deliveryUpdates.pickedUpAt = new Date();
+        if (status === 'OUT_FOR_DELIVERY') deliveryUpdates.outForDeliveryAt = new Date();
+        if (status === 'DELIVERED') deliveryUpdates.deliveredAt = new Date();
+        if (status === 'FAILED') deliveryUpdates.failedAt = new Date();
+        if (status === 'CANCELLED') deliveryUpdates.cancelledAt = new Date();
+
+        await db.update(deliveries).set(deliveryUpdates).where(eq(deliveries.id, delivery.id));
+        
+        // Sync Order Status conceptually
+        let orderStatus = status;
+        if (['ASSIGNED', 'ACCEPTED', 'PICKUP_READY'].includes(status)) orderStatus = 'CONFIRMED';
+        if (status === 'UNASSIGNED') orderStatus = 'PENDING';
+        
+        await db.update(orders).set({ status: orderStatus, updatedAt: new Date() }).where(eq(orders.id, orderId));
+      } else if (status && !delivery) {
+         // Fallback for orders without deliveries created yet
+         await db.update(orders).set({ status, updatedAt: new Date() }).where(eq(orders.id, orderId));
       }
       
-      await db.update(orders).set(updateData).where(eq(orders.id, orderId));
       res.json({ success: true });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: "Failed to update order status" });
     }
   });
@@ -433,6 +515,7 @@ async function startServer() {
 
       const orderIds = assignments.map(o => o.id);
       let items: any[] = [];
+      let deliveryRecords: any[] = [];
       if (orderIds.length > 0) {
         items = await db.select({
           orderId: orderItems.orderId,
@@ -445,15 +528,19 @@ async function startServer() {
         .leftJoin(variants, eq(orderItems.variantId, variants.id))
         .leftJoin(products, eq(variants.productId, products.id))
         .where(inArray(orderItems.orderId, orderIds));
+
+        deliveryRecords = await db.select().from(deliveries).where(inArray(deliveries.orderId, orderIds));
       }
 
       const ordersWithItems = assignments.map(order => ({
         ...order,
-        items: items.filter(i => i.orderId === order.id)
+        items: items.filter(i => i.orderId === order.id),
+        delivery: deliveryRecords.find(d => d.orderId === order.id) || null
       }));
 
       res.json({ orders: ordersWithItems });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: "Failed to fetch assignments" });
     }
   });
