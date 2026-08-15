@@ -80,6 +80,10 @@ export const CartSidebar = () => {
         setCheckoutError('Please provide a delivery address.');
         return;
       }
+      if (!zoneId) {
+        setCheckoutError('Please select a delivery zone.');
+        return;
+      }
       
       // Authoritative Serviceability Validation
       setCheckingOut(true);
@@ -259,12 +263,17 @@ export const CartSidebar = () => {
                   <div className="w-full bg-[#111] border border-white/10 text-white/50 p-3 text-sm flex items-center justify-center">
                     Loading zones...
                   </div>
+                ) : availableZones.length === 0 ? (
+                  <div className="w-full bg-red-950/20 border border-red-500/30 text-red-400 p-3 text-[10px] uppercase tracking-widest leading-relaxed">
+                    No active delivery zones available right now. We cannot process orders at this time.
+                  </div>
                 ) : (
                   <select 
                     value={zoneId}
                     onChange={(e) => setZoneId(e.target.value)}
                     className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
                   >
+                    <option value="" disabled>Select your zone...</option>
                     {availableZones.map(z => (
                       <option key={z.id} value={z.id}>{z.name} - KES {Number(z.fee)}</option>
                     ))}

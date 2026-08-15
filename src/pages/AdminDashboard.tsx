@@ -620,8 +620,18 @@ export const AdminDashboard = () => {
             </tbody>
           </table>
           {deliveryZones.length === 0 && (
-            <div className="py-12 text-center text-white/40 text-sm font-serif">
-              No delivery zones configured.
+            <div className="py-12 text-center flex flex-col items-center">
+              <span className="text-white/40 text-sm font-serif mb-4">No delivery zones configured.</span>
+              <button 
+                onClick={() => {
+                  setEditingZone(null);
+                  setNewZone({ name: 'Kakamega Town & Environs', fee: '150', isActive: true, isAcceptingOrders: true });
+                  setShowZoneModal(true);
+                }}
+                className="border border-[#c5a059] text-[#c5a059] hover:bg-[#c5a059]/10 px-4 py-2 text-[10px] uppercase tracking-widest transition-colors"
+              >
+                Setup Initial Kakamega Service Area
+              </button>
             </div>
           )}
         </div>
