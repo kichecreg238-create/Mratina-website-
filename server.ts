@@ -471,8 +471,7 @@ async function startServer() {
         }
         // Sync to order for backwards compatibility 
         await db.update(orders).set({ 
-          delivererId: finalDelivererId,
-          status: finalDelivererId ? 'CONFIRMED' : 'PENDING'
+          delivererId: finalDelivererId
         }).where(eq(orders.id, orderId));
       }
 
@@ -534,12 +533,13 @@ async function startServer() {
         await db.update(deliveries).set(deliveryUpdates).where(eq(deliveries.id, delivery.id));
         
         // Sync Order Status conceptually
-        let orderStatus = status;
-        if (['ASSIGNED', 'ACCEPTED', 'PICKUP_READY'].includes(status)) orderStatus = 'CONFIRMED';
-        if (status === 'UNASSIGNED') orderStatus = 'PENDING';
-        
-        const orderUpdates: any = { status: orderStatus, updatedAt: new Date() };
+        const orderUpdates: any = { updatedAt: new Date() };
         if (status === 'UNASSIGNED') orderUpdates.delivererId = null;
+        
+        // Only sync terminal/major statuses that exist in order lifecycle
+        if (['DELIVERED', 'FAILED', 'CANCELLED'].includes(status)) {
+            orderUpdates.status = status;
+        }
 
         await db.update(orders).set(orderUpdates).where(eq(orders.id, orderId));
       } else if (status && !delivery) {
@@ -665,7 +665,7 @@ async function startServer() {
       if (delivery.latitude && delivery.longitude) {
          destinationStr = `${delivery.latitude},${delivery.longitude}`;
       } else if (order.deliveryAddress) {
-         destinationStr = encodeURIComponent(order.deliveryAddress + ", " + (order.deliveryZone || "Kakamega"));
+         destinationStr = encodeURIComponent(order.deliveryAddress + (order.deliveryZone ? ", " + order.deliveryZone : ""));
       }
       
       if (!destinationStr) {
