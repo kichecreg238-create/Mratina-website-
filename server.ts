@@ -427,13 +427,25 @@ async function startServer() {
       const deliveryRes = await db.select().from(deliveries).where(eq(deliveries.orderId, orderId));
       let delivery = deliveryRes[0];
 
+      // Prevent modifications to terminal states if not admin overriding
+      if (delivery && ['DELIVERED', 'CANCELLED'].includes(delivery.status) && !isAdmin) {
+         return res.status(400).json({ error: "Cannot modify a completed or cancelled delivery" });
+      }
+
       // If updating delivererId (Admin only)
       if (delivererId !== undefined && isAdmin) {
+        if (delivery && ['DELIVERED', 'CANCELLED'].includes(delivery.status)) {
+           return res.status(400).json({ error: "Cannot assign a completed or cancelled delivery" });
+        }
+
         if (delivererId !== null && delivererId !== "") {
           const delivererRes = await db.select().from(users).where(eq(users.id, parseInt(delivererId)));
           const deliverer = delivererRes[0];
           if (!deliverer || deliverer.role !== 'DELIVERER') {
             return res.status(400).json({ error: "Invalid deliverer assigned. Must be a valid user with DELIVERER role." });
+          }
+          if (!deliverer.isAvailable) {
+            return res.status(400).json({ error: "Selected deliverer is currently unavailable." });
           }
         }
         
@@ -448,6 +460,7 @@ async function startServer() {
            }).returning();
            delivery = newDel;
         } else {
+           // Prevent silent overwrite of another active assignment unless explicitly intended (Admin action handles this)
            const [updatedDel] = await db.update(deliveries).set({
              delivererId: finalDelivererId,
              status: finalDelivererId ? 'ASSIGNED' : 'UNASSIGNED',
@@ -457,7 +470,10 @@ async function startServer() {
            delivery = updatedDel;
         }
         // Sync to order for backwards compatibility 
-        await db.update(orders).set({ delivererId: finalDelivererId }).where(eq(orders.id, orderId));
+        await db.update(orders).set({ 
+          delivererId: finalDelivererId,
+          status: finalDelivererId ? 'CONFIRMED' : 'PENDING'
+        }).where(eq(orders.id, orderId));
       }
 
       // If updating status
@@ -615,6 +631,65 @@ async function startServer() {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch eligible deliverers" });
+    }
+  });
+
+  // --- NAVIGATION BOUNDARY ---
+  app.get("/api/deliveries/:id/navigate", requireAuth, requireRole(['DELIVERER', 'ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      
+      const deliveryRes = await db.select().from(deliveries).where(eq(deliveries.orderId, orderId));
+      const delivery = deliveryRes[0];
+      
+      if (!delivery) {
+        return res.status(404).json({ error: "Delivery not found" });
+      }
+
+      if (['CANCELLED', 'DELIVERED'].includes(delivery.status)) {
+        return res.status(400).json({ error: "Cannot navigate to a completed or cancelled delivery" });
+      }
+      
+      const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+      const order = orderRes[0];
+
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      // Construct navigation boundary payload
+      // In this phase, we don't have a real maps integration, but we return structured data
+      // indicating what *would* be used.
+      
+      let destinationStr = "";
+      if (delivery.latitude && delivery.longitude) {
+         destinationStr = `${delivery.latitude},${delivery.longitude}`;
+      } else if (order.deliveryAddress) {
+         destinationStr = encodeURIComponent(order.deliveryAddress + ", " + (order.deliveryZone || "Kakamega"));
+      }
+      
+      if (!destinationStr) {
+         return res.status(400).json({ error: "Unable to construct navigation destination. Missing location data." });
+      }
+      
+      // E.g., fallback to Google Maps dir url
+      const navigationUrl = `https://www.google.com/maps/dir/?api=1&destination=${destinationStr}`;
+
+      res.json({ 
+        success: true, 
+        navigationUrl,
+        provider: "UNCONFIGURED_FALLBACK",
+        location: {
+          address: order.deliveryAddress,
+          landmark: order.landmark,
+          lat: delivery.latitude,
+          lng: delivery.longitude,
+          source: delivery.locationSource || 'MANUAL'
+        }
+      });
+    } catch (error) {
+       console.error(error);
+       res.status(500).json({ error: "Failed to construct navigation boundary" });
     }
   });
 

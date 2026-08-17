@@ -55,6 +55,42 @@ export const DelivererDashboard = () => {
     }
   };
 
+  const handleNavigation = async (orderId: number) => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch(`/api/deliveries/${orderId}/navigate`, {
+        headers: {
+          'Authorization': `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      
+      if (!res.ok) {
+        alert(data.error || 'Failed to initialize navigation');
+        return;
+      }
+
+      // Check the state first, update to OUT_FOR_DELIVERY if needed
+      const order = orders.find(o => o.id === orderId);
+      if (order && order.delivery?.status === 'PICKED_UP') {
+         await updateStatus(orderId, 'OUT_FOR_DELIVERY');
+      }
+
+      if (data.navigationUrl) {
+        if (data.provider === 'UNCONFIGURED_FALLBACK') {
+          // Inform the user it's a fallback since we haven't implemented live maps
+          alert("Navigation provider not fully configured. Using fallback map link.");
+        }
+        window.open(data.navigationUrl, '_blank');
+      } else {
+        alert("Navigation is not configured for this delivery.");
+      }
+    } catch (e) {
+      alert("Failed to initialize navigation boundary.");
+    }
+  };
+
   const updateStatus = async (orderId: number, status: string) => {
     if (!user) return;
     let failureReason = undefined;
@@ -178,14 +214,19 @@ export const DelivererDashboard = () => {
                       </button>
                     )}
                     {deliveryStatus === 'PICKED_UP' && (
-                      <button onClick={() => updateStatus(order.id, 'OUT_FOR_DELIVERY')} className="flex-1 py-3 bg-blue-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-blue-500">
+                      <button onClick={() => handleNavigation(order.id)} className="flex-1 py-3 bg-blue-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-blue-500">
                         Start Navigation
                       </button>
                     )}
                     {deliveryStatus === 'OUT_FOR_DELIVERY' && (
-                      <button onClick={() => updateStatus(order.id, 'DELIVERED')} className="flex-1 py-3 bg-green-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-green-500">
-                        Mark Delivered
-                      </button>
+                      <>
+                        <button onClick={() => handleNavigation(order.id)} className="flex-1 py-3 border border-blue-600/50 text-blue-400 font-bold text-[9px] uppercase tracking-widest hover:bg-blue-600/10">
+                          Resume Navigation
+                        </button>
+                        <button onClick={() => updateStatus(order.id, 'DELIVERED')} className="flex-1 py-3 bg-green-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-green-500">
+                          Mark Delivered
+                        </button>
+                      </>
                     )}
                   </div>
                   {['ACCEPTED', 'PICKUP_READY', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(deliveryStatus) && (

@@ -317,6 +317,9 @@ export const AdminDashboard = () => {
                       <div className="flex flex-col gap-1">
                         <span className="text-white/80 bg-white/10 px-2 py-1 text-[10px] tracking-wider uppercase rounded-sm border border-white/5 inline-block w-fit">O: {order.status}</span>
                         <span className="text-[#c5a059] bg-[#c5a059]/10 px-2 py-1 text-[10px] tracking-wider uppercase rounded-sm border border-[#c5a059]/20 inline-block w-fit">D: {order.delivery?.status || 'UNASSIGNED'}</span>
+                        {order.delivery?.failureReason && (
+                           <span className="text-red-400 text-[9px] mt-1 italic break-words max-w-[150px]">Reason: {order.delivery.failureReason}</span>
+                        )}
                       </div>
                     </td>
                     <td className="py-4 px-4 min-w-[150px]">
@@ -328,7 +331,7 @@ export const AdminDashboard = () => {
                       >
                         <option value="">Unassigned</option>
                         {deliverers.map(d => (
-                          <option key={d.id} value={d.id}>{d.email}</option>
+                          <option key={d.id} value={d.id}>{d.email} {d.isAvailable ? '(Available)' : '(Unavailable)'}</option>
                         ))}
                       </select>
                     </td>
