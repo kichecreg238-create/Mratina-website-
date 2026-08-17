@@ -428,14 +428,14 @@ async function startServer() {
       let delivery = deliveryRes[0];
 
       // Prevent modifications to terminal states if not admin overriding
-      if (delivery && ['DELIVERED', 'CANCELLED'].includes(delivery.status) && !isAdmin) {
-         return res.status(400).json({ error: "Cannot modify a completed or cancelled delivery" });
+      if (delivery && ['DELIVERED', 'CANCELLED', 'FAILED'].includes(delivery.status) && !isAdmin) {
+         return res.status(400).json({ error: "Cannot modify a completed, failed or cancelled delivery" });
       }
 
       // If updating delivererId (Admin only)
       if (delivererId !== undefined && isAdmin) {
-        if (delivery && ['DELIVERED', 'CANCELLED'].includes(delivery.status)) {
-           return res.status(400).json({ error: "Cannot assign a completed or cancelled delivery" });
+        if (delivery && ['DELIVERED', 'CANCELLED', 'FAILED'].includes(delivery.status)) {
+           return res.status(400).json({ error: "Cannot assign a completed, failed or cancelled delivery" });
         }
 
         if (delivererId !== null && delivererId !== "") {
@@ -646,8 +646,15 @@ async function startServer() {
         return res.status(404).json({ error: "Delivery not found" });
       }
 
-      if (['CANCELLED', 'DELIVERED'].includes(delivery.status)) {
-        return res.status(400).json({ error: "Cannot navigate to a completed or cancelled delivery" });
+      const user = await getUserByUid(req.user!.uid);
+      const isAdmin = user.role === 'ADMIN';
+
+      if (!isAdmin && delivery.delivererId !== user.id) {
+         return res.status(403).json({ error: "Not authorized to access navigation for this delivery" });
+      }
+
+      if (['CANCELLED', 'DELIVERED', 'FAILED'].includes(delivery.status)) {
+        return res.status(400).json({ error: "Cannot navigate to a completed, failed or cancelled delivery" });
       }
       
       const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
