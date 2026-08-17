@@ -58,8 +58,8 @@ export const DelivererDashboard = () => {
   const updateStatus = async (orderId: number, status: string) => {
     if (!user) return;
     let failureReason = undefined;
-    if (status === 'FAILED' || status === 'CANCELLED') {
-      const reason = prompt("Please provide a reason for failure/cancellation:");
+    if (status === 'FAILED' || status === 'CANCELLED' || status === 'UNASSIGNED') {
+      const reason = prompt(`Please provide a reason for ${status === 'UNASSIGNED' ? 'declining' : 'failure/cancellation'}:`);
       if (!reason) return; // Cancel update
       failureReason = reason;
     }
@@ -81,10 +81,14 @@ export const DelivererDashboard = () => {
         return;
       }
       
-      setOrders(orders.map(o => o.id === orderId ? { 
-        ...o, 
-        delivery: o.delivery ? { ...o.delivery, status, failureReason } : { status, failureReason }
-      } : o));
+      if (status === 'UNASSIGNED') {
+        setOrders(orders.filter(o => o.id !== orderId));
+      } else {
+        setOrders(orders.map(o => o.id === orderId ? { 
+          ...o, 
+          delivery: o.delivery ? { ...o.delivery, status, failureReason } : { status, failureReason }
+        } : o));
+      }
     } catch (e) {
       alert('Failed to update status');
     }
@@ -151,30 +155,42 @@ export const DelivererDashboard = () => {
                   )}
                 </div>
                 
-                <div className="flex gap-2">
-                  {deliveryStatus === 'ASSIGNED' && (
-                    <button onClick={() => updateStatus(order.id, 'ACCEPTED')} className="flex-1 py-3 border border-[#c5a059] text-[#c5a059] font-bold text-[9px] uppercase tracking-widest hover:bg-[#c5a059]/10">
-                      Accept Order
-                    </button>
-                  )}
-                  {deliveryStatus === 'ACCEPTED' && (
-                    <button onClick={() => updateStatus(order.id, 'PICKUP_READY')} className="flex-1 py-3 border border-white/20 text-[9px] uppercase tracking-widest hover:bg-white/5">
-                      Arrived at Depot
-                    </button>
-                  )}
-                  {deliveryStatus === 'PICKUP_READY' && (
-                    <button onClick={() => updateStatus(order.id, 'PICKED_UP')} className="flex-1 py-3 bg-[#c5a059] text-black font-bold text-[9px] uppercase tracking-widest hover:bg-[#d4b271]">
-                      Package Picked Up
-                    </button>
-                  )}
-                  {deliveryStatus === 'PICKED_UP' && (
-                    <button onClick={() => updateStatus(order.id, 'OUT_FOR_DELIVERY')} className="flex-1 py-3 bg-blue-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-blue-500">
-                      Start Navigation
-                    </button>
-                  )}
-                  {deliveryStatus === 'OUT_FOR_DELIVERY' && (
-                    <button onClick={() => updateStatus(order.id, 'DELIVERED')} className="flex-1 py-3 bg-green-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-green-500">
-                      Mark Delivered
+                <div className="flex flex-col gap-2">
+                  <div className="flex gap-2">
+                    {deliveryStatus === 'ASSIGNED' && (
+                      <>
+                        <button onClick={() => updateStatus(order.id, 'ACCEPTED')} className="flex-1 py-3 border border-[#c5a059] text-[#c5a059] font-bold text-[9px] uppercase tracking-widest hover:bg-[#c5a059]/10">
+                          Accept
+                        </button>
+                        <button onClick={() => updateStatus(order.id, 'UNASSIGNED')} className="flex-1 py-3 border border-red-500/50 text-red-400 font-bold text-[9px] uppercase tracking-widest hover:bg-red-500/10">
+                          Decline
+                        </button>
+                      </>
+                    )}
+                    {deliveryStatus === 'ACCEPTED' && (
+                      <button onClick={() => updateStatus(order.id, 'PICKUP_READY')} className="flex-1 py-3 border border-white/20 text-[9px] uppercase tracking-widest hover:bg-white/5">
+                        Arrived at Depot
+                      </button>
+                    )}
+                    {deliveryStatus === 'PICKUP_READY' && (
+                      <button onClick={() => updateStatus(order.id, 'PICKED_UP')} className="flex-1 py-3 bg-[#c5a059] text-black font-bold text-[9px] uppercase tracking-widest hover:bg-[#d4b271]">
+                        Package Picked Up
+                      </button>
+                    )}
+                    {deliveryStatus === 'PICKED_UP' && (
+                      <button onClick={() => updateStatus(order.id, 'OUT_FOR_DELIVERY')} className="flex-1 py-3 bg-blue-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-blue-500">
+                        Start Navigation
+                      </button>
+                    )}
+                    {deliveryStatus === 'OUT_FOR_DELIVERY' && (
+                      <button onClick={() => updateStatus(order.id, 'DELIVERED')} className="flex-1 py-3 bg-green-600 text-white font-bold text-[9px] uppercase tracking-widest hover:bg-green-500">
+                        Mark Delivered
+                      </button>
+                    )}
+                  </div>
+                  {['ACCEPTED', 'PICKUP_READY', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(deliveryStatus) && (
+                    <button onClick={() => updateStatus(order.id, 'FAILED')} className="w-full py-2 border border-red-500/20 text-red-500/80 text-[9px] uppercase tracking-widest hover:bg-red-500/10">
+                      Report Issue / Failed
                     </button>
                   )}
                 </div>

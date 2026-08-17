@@ -487,7 +487,21 @@ async function startServer() {
         }
 
         const deliveryUpdates: any = { status, updatedAt: new Date() };
-        if (status === 'ACCEPTED') deliveryUpdates.acceptedAt = new Date();
+        
+        if (status === 'UNASSIGNED') {
+          if (!isAdmin && !failureReason) {
+            return res.status(400).json({ error: "A reason is required to decline an assignment" });
+          }
+          deliveryUpdates.delivererId = null;
+          if (failureReason) deliveryUpdates.failureReason = failureReason;
+        }
+
+        if (status === 'ACCEPTED') {
+          if (!isAdmin && !user.isAvailable) {
+            return res.status(400).json({ error: "You must be available to accept new assignments" });
+          }
+          deliveryUpdates.acceptedAt = new Date();
+        }
         if (status === 'PICKUP_READY') deliveryUpdates.pickupReadyAt = new Date();
         if (status === 'PICKED_UP') deliveryUpdates.pickedUpAt = new Date();
         if (status === 'OUT_FOR_DELIVERY') deliveryUpdates.outForDeliveryAt = new Date();
@@ -508,7 +522,10 @@ async function startServer() {
         if (['ASSIGNED', 'ACCEPTED', 'PICKUP_READY'].includes(status)) orderStatus = 'CONFIRMED';
         if (status === 'UNASSIGNED') orderStatus = 'PENDING';
         
-        await db.update(orders).set({ status: orderStatus, updatedAt: new Date() }).where(eq(orders.id, orderId));
+        const orderUpdates: any = { status: orderStatus, updatedAt: new Date() };
+        if (status === 'UNASSIGNED') orderUpdates.delivererId = null;
+
+        await db.update(orders).set(orderUpdates).where(eq(orders.id, orderId));
       } else if (status && !delivery) {
          // Fallback for orders without deliveries created yet
          await db.update(orders).set({ status, updatedAt: new Date() }).where(eq(orders.id, orderId));
@@ -525,18 +542,34 @@ async function startServer() {
   app.get("/api/deliverer/assignments", requireAuth, requireRole(['DELIVERER']), async (req: AuthRequest, res) => {
     try {
       const user = await getUserByUid(req.user!.uid);
-      const assignments = await db.select().from(orders)
-        .where(eq(orders.delivererId, user.id))
-        .orderBy(desc(orders.createdAt));
+      
+      const myDeliveries = await db.select().from(deliveries)
+        .where(eq(deliveries.delivererId, user.id))
+        .orderBy(desc(deliveries.createdAt));
 
-      const orderIds = assignments.map(o => o.id);
+      const orderIds = myDeliveries.map(d => d.orderId);
+      
+      let ordersData: any[] = [];
       let items: any[] = [];
-      let deliveryRecords: any[] = [];
+      
       if (orderIds.length > 0) {
+        // Only fetch operationally necessary info for orders
+        ordersData = await db.select({
+          id: orders.id,
+          status: orders.status,
+          totalAmount: orders.totalAmount,
+          deliveryAddress: orders.deliveryAddress,
+          landmark: orders.landmark,
+          deliveryZone: orders.deliveryZone,
+          deliveryInstructions: orders.deliveryInstructions,
+          createdAt: orders.createdAt
+        })
+        .from(orders)
+        .where(inArray(orders.id, orderIds));
+
         items = await db.select({
           orderId: orderItems.orderId,
           quantity: orderItems.quantity,
-          priceAtPurchase: orderItems.priceAtPurchase,
           variant: variants,
           product: products
         })
@@ -544,17 +577,23 @@ async function startServer() {
         .leftJoin(variants, eq(orderItems.variantId, variants.id))
         .leftJoin(products, eq(variants.productId, products.id))
         .where(inArray(orderItems.orderId, orderIds));
-
-        deliveryRecords = await db.select().from(deliveries).where(inArray(deliveries.orderId, orderIds));
       }
 
-      const ordersWithItems = assignments.map(order => ({
-        ...order,
-        items: items.filter(i => i.orderId === order.id),
-        delivery: deliveryRecords.find(d => d.orderId === order.id) || null
-      }));
+      const assignments = myDeliveries.map(delivery => {
+        const relatedOrder = ordersData.find(o => o.id === delivery.orderId);
+        return {
+          id: relatedOrder?.id,
+          deliveryAddress: relatedOrder?.deliveryAddress,
+          landmark: relatedOrder?.landmark,
+          deliveryZone: relatedOrder?.deliveryZone,
+          deliveryInstructions: relatedOrder?.deliveryInstructions,
+          status: relatedOrder?.status,
+          items: items.filter(i => i.orderId === delivery.orderId),
+          delivery: delivery
+        };
+      });
 
-      res.json({ orders: ordersWithItems });
+      res.json({ orders: assignments });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch assignments" });
