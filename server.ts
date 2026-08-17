@@ -6,7 +6,7 @@ import { getOrCreateUser, getUserByUid } from "./src/db/users.ts";
 import { getActiveProducts, createOrder } from "./src/db/commerce.ts";
 import { db } from "./src/db/index.ts";
 import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries } from "./src/db/schema.ts";
-import { eq, desc, inArray } from "drizzle-orm";
+import { eq, desc, inArray, and } from "drizzle-orm";
 
 async function startServer() {
   const app = express();
@@ -419,7 +419,7 @@ async function startServer() {
   app.post("/api/admin/orders/:id/status", requireAuth, requireRole(['ADMIN', 'DELIVERER']), async (req: AuthRequest, res) => {
     try {
       const orderId = parseInt(req.params.id);
-      const { status, delivererId } = req.body;
+      const { status, delivererId, failureReason } = req.body;
       const user = await getUserByUid(req.user!.uid);
       const isAdmin = user.role === 'ADMIN';
 
@@ -492,8 +492,14 @@ async function startServer() {
         if (status === 'PICKED_UP') deliveryUpdates.pickedUpAt = new Date();
         if (status === 'OUT_FOR_DELIVERY') deliveryUpdates.outForDeliveryAt = new Date();
         if (status === 'DELIVERED') deliveryUpdates.deliveredAt = new Date();
-        if (status === 'FAILED') deliveryUpdates.failedAt = new Date();
-        if (status === 'CANCELLED') deliveryUpdates.cancelledAt = new Date();
+        if (status === 'FAILED') {
+          deliveryUpdates.failedAt = new Date();
+          if (failureReason) deliveryUpdates.failureReason = failureReason;
+        }
+        if (status === 'CANCELLED') {
+          deliveryUpdates.cancelledAt = new Date();
+          if (failureReason) deliveryUpdates.failureReason = failureReason;
+        }
 
         await db.update(deliveries).set(deliveryUpdates).where(eq(deliveries.id, delivery.id));
         
@@ -552,6 +558,38 @@ async function startServer() {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch assignments" });
+    }
+  });
+
+  // --- DISPATCH & AVAILABILITY APIs ---
+  app.get("/api/admin/dispatch/eligible-deliverers", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      // Find all eligible deliverers: must have DELIVERER role and be available.
+      // (Future: filter by zone or assignment constraint)
+      const availableDeliverers = await db.select({
+        id: users.id,
+        email: users.email,
+        isAvailable: users.isAvailable
+      }).from(users).where(and(eq(users.role, 'DELIVERER'), eq(users.isAvailable, true)));
+      
+      res.json({ deliverers: availableDeliverers });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to fetch eligible deliverers" });
+    }
+  });
+
+  app.post("/api/deliverer/availability", requireAuth, requireRole(['DELIVERER']), async (req: AuthRequest, res) => {
+    try {
+      const { isAvailable } = req.body;
+      const user = await getUserByUid(req.user!.uid);
+      
+      await db.update(users).set({ isAvailable }).where(eq(users.id, user.id));
+      
+      res.json({ success: true, isAvailable });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to update availability" });
     }
   });
 

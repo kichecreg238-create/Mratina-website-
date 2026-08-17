@@ -7,13 +7,19 @@ export const DelivererDashboard = () => {
   const { user, dbUser, loading } = useAuthStore();
   const [orders, setOrders] = useState<any[]>([]);
   const [fetching, setFetching] = useState(true);
+  const [isAvailable, setIsAvailable] = useState<boolean>(dbUser?.isAvailable || false);
+
+  useEffect(() => {
+    if (dbUser && dbUser.role === 'DELIVERER') {
+      setIsAvailable(dbUser.isAvailable || false);
+    }
+  }, [dbUser]);
 
   useEffect(() => {
     if (!user || (dbUser && dbUser.role !== 'DELIVERER')) {
       setFetching(false);
       return;
     }
-
     user.getIdToken().then(token => {
       fetch('/api/deliverer/assignments', {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -27,8 +33,37 @@ export const DelivererDashboard = () => {
     });
   }, [user, dbUser]);
 
+  const toggleAvailability = async () => {
+    if (!user) return;
+    try {
+      const token = await user.getIdToken();
+      const newStatus = !isAvailable;
+      const res = await fetch('/api/deliverer/availability', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ isAvailable: newStatus })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        setIsAvailable(data.isAvailable);
+      }
+    } catch (e) {
+      alert('Failed to update availability');
+    }
+  };
+
   const updateStatus = async (orderId: number, status: string) => {
     if (!user) return;
+    let failureReason = undefined;
+    if (status === 'FAILED' || status === 'CANCELLED') {
+      const reason = prompt("Please provide a reason for failure/cancellation:");
+      if (!reason) return; // Cancel update
+      failureReason = reason;
+    }
+
     try {
       const token = await user.getIdToken();
       const res = await fetch(`/api/admin/orders/${orderId}/status`, {
@@ -37,7 +72,7 @@ export const DelivererDashboard = () => {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`
         },
-        body: JSON.stringify({ status })
+        body: JSON.stringify({ status, failureReason })
       });
       
       const data = await res.json();
@@ -48,7 +83,7 @@ export const DelivererDashboard = () => {
       
       setOrders(orders.map(o => o.id === orderId ? { 
         ...o, 
-        delivery: o.delivery ? { ...o.delivery, status } : { status }
+        delivery: o.delivery ? { ...o.delivery, status, failureReason } : { status, failureReason }
       } : o));
     } catch (e) {
       alert('Failed to update status');
@@ -60,7 +95,22 @@ export const DelivererDashboard = () => {
 
   return (
     <div className="flex-1 flex flex-col p-6 md:p-12 md:pt-24 h-full overflow-y-auto">
-      <h2 className="text-sm uppercase tracking-[0.4em] text-[#c5a059] mb-8 border-b border-white/5 pb-4">Dispatch / Active Assignments</h2>
+      <div className="flex justify-between items-center border-b border-white/5 pb-4 mb-8">
+        <h2 className="text-sm uppercase tracking-[0.4em] text-[#c5a059]">Dispatch / Active Assignments</h2>
+        <div className="flex items-center gap-3">
+          <span className="text-[10px] uppercase tracking-widest text-white/50">Status:</span>
+          <button 
+            onClick={toggleAvailability}
+            className={`px-3 py-1 text-[10px] uppercase tracking-widest transition-colors ${
+              isAvailable 
+                ? 'bg-green-500/20 text-green-400 border border-green-500/30' 
+                : 'bg-white/5 text-white/50 border border-white/10 hover:bg-white/10'
+            }`}
+          >
+            {isAvailable ? 'Available' : 'Unavailable'}
+          </button>
+        </div>
+      </div>
       
       {orders.length === 0 ? (
         <div className="py-24 text-center text-white/40 text-sm font-serif">

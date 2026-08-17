@@ -75,9 +75,19 @@ export const AdminDashboard = () => {
     if (!user) return;
     setUpdating(orderId);
     
+    let failureReason = undefined;
+    if (status === 'FAILED' || status === 'CANCELLED') {
+      const reason = prompt("Please provide a reason for failure/cancellation:");
+      if (!reason) {
+        setUpdating(null);
+        return; // Cancel update
+      }
+      failureReason = reason;
+    }
+
     try {
       const token = await user.getIdToken();
-      const body: any = { status };
+      const body: any = { status, failureReason };
       if (delivererId) body.delivererId = delivererId;
 
       await fetch(`/api/admin/orders/${orderId}/status`, {
@@ -93,7 +103,7 @@ export const AdminDashboard = () => {
         ...o, 
         status, 
         delivererId: delivererId || o.delivererId,
-        delivery: { ...(o.delivery || {}), status }
+        delivery: { ...(o.delivery || {}), status, failureReason }
       } : o));
     } catch (e) {
       alert('Failed to update status');

@@ -7,6 +7,7 @@ export const users = pgTable('users', {
   uid: text('uid').notNull().unique(), // Firebase Auth UID
   email: text('email').notNull(),
   role: text('role').notNull().default('CUSTOMER'), // CUSTOMER, ADMIN, DELIVERER
+  isAvailable: boolean('is_available').default(false).notNull(), // DELIVERER availability
   createdAt: timestamp('created_at').defaultNow(),
 });
 
