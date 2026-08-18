@@ -12,6 +12,7 @@ export const CartSidebar = () => {
   const [step, setStep] = useState<CheckoutStep>('CART');
   const [checkingOut, setCheckingOut] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
+  const [unconfiguredOrderId, setUnconfiguredOrderId] = useState<number | null>(null);
   
   // Delivery Zones & Serviceability State
   const [availableZones, setAvailableZones] = useState<any[]>([]);
@@ -117,6 +118,36 @@ export const CartSidebar = () => {
     }
   };
 
+  const handleDevSimulate = async () => {
+    if (!unconfiguredOrderId) return;
+    setCheckingOut(true);
+    setCheckoutError(null);
+    try {
+      const token = await user!.getIdToken();
+      const res = await fetch('/api/dev/simulate-payment', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ orderId: unconfiguredOrderId, provider: 'M-PESA' })
+      });
+      const data = await res.json();
+      if (data.success) {
+        alert(`DEVELOPMENT SIMULATION SUCCESSFUL.\n\nOrder #${unconfiguredOrderId} marked as paid.`);
+        useCartStore.getState().clearCart();
+        toggleCart();
+        setUnconfiguredOrderId(null);
+      } else {
+        setCheckoutError(data.error || 'Simulation failed');
+      }
+    } catch (e) {
+       setCheckoutError('Simulation request failed.');
+    } finally {
+       setCheckingOut(false);
+    }
+  };
+
   const handleCheckout = async () => {
     setCheckoutError(null);
     if (!phone.trim()) {
@@ -171,13 +202,11 @@ export const CartSidebar = () => {
       const payData = await payRes.json();
       
       if (!payData.isConfigured) {
-        // Provider is not configured. 
-        alert(`Order #${orderId} created, but M-Pesa integration is currently unconfigured.\n\nTriggering development simulation payment.`);
-        await fetch('/api/dev/simulate-payment', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ orderId, provider: 'M-PESA' })
-        });
+        // Provider is not configured.
+        setUnconfiguredOrderId(orderId);
+        setCheckoutError('Payment provider unconfigured. Development mode available.');
+        setCheckingOut(false);
+        return;
       } else if (!payData.success) {
         setCheckoutError(payData.error || 'Payment initiation failed.');
         setCheckingOut(false);
@@ -406,6 +435,15 @@ export const CartSidebar = () => {
                 (step === 'CART' ? (user ? 'Proceed to Delivery' : 'Sign In to Checkout') : 
                 (step === 'DELIVERY' ? 'Proceed to Payment' : `Pay KES ${finalTotal.toLocaleString()}`))}
             </button>
+            {unconfiguredOrderId && (
+              <button 
+                onClick={handleDevSimulate}
+                disabled={checkingOut}
+                className="w-full py-4 mt-2 bg-transparent border border-dashed border-[#c5a059] hover:bg-[#c5a059]/10 text-[#c5a059] text-[10px] font-bold uppercase tracking-[0.2em] transition-colors flex justify-center items-center gap-2"
+              >
+                {checkingOut ? 'Simulating...' : 'TRIGGER DEV SIMULATION'}
+              </button>
+            )}
           </div>
         )}
       </div>

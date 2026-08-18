@@ -7,7 +7,7 @@ import { getActiveProducts, createOrder } from "./src/db/commerce.ts";
 import { db } from "./src/db/index.ts";
 import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries, payments } from "./src/db/schema.ts";
 import { eq, desc, inArray, and } from "drizzle-orm";
-import { paymentService } from "./src/services/payment.ts";
+import { paymentService, isValidProvider } from "./src/services/payment.ts";
 
 async function startServer() {
   const app = express();
@@ -719,6 +719,11 @@ async function startServer() {
   app.post("/api/payments/initiate", requireAuth, async (req: AuthRequest, res) => {
     try {
       const { orderId, provider, phoneNumber } = req.body;
+      
+      if (!isValidProvider(provider)) {
+        return res.status(400).json({ error: "Invalid provider" });
+      }
+      
       const user = await getUserByUid(req.user!.uid);
       
       const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
@@ -751,7 +756,7 @@ async function startServer() {
         orderId: order.id,
         amount: Number(order.totalAmount),
         phoneNumber: phoneNumber,
-        provider: provider as any
+        provider: provider
       });
       
       if (!result.isConfigured) {
@@ -848,7 +853,7 @@ async function startServer() {
   // This explicitly replaces the old fake behavior with a dev-only tool.
   // Because the production webhook securely rejects unconfigured providers,
   // the simulator bypasses the webhook and updates the DB directly.
-  app.post("/api/dev/simulate-payment", async (req, res) => {
+  app.post("/api/dev/simulate-payment", requireAuth, async (req: AuthRequest, res) => {
      if (process.env.NODE_ENV === 'production') {
        return res.status(403).json({ error: "Simulation is not available in production." });
      }
