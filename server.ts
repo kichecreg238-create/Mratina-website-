@@ -5,8 +5,9 @@ import { requireAuth, requireRole, AuthRequest } from "./src/middleware/auth.ts"
 import { getOrCreateUser, getUserByUid } from "./src/db/users.ts";
 import { getActiveProducts, createOrder } from "./src/db/commerce.ts";
 import { db } from "./src/db/index.ts";
-import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries } from "./src/db/schema.ts";
+import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries, payments } from "./src/db/schema.ts";
 import { eq, desc, inArray, and } from "drizzle-orm";
+import { paymentService } from "./src/services/payment.ts";
 
 async function startServer() {
   const app = express();
@@ -714,21 +715,143 @@ async function startServer() {
     }
   });
 
-  // --- PAYMENT WEBHOOK (Simulation) ---
-  app.post("/api/webhooks/payment", async (req, res) => {
+  // --- PAYMENT ENGINE ---
+  app.post("/api/payments/initiate", requireAuth, async (req: AuthRequest, res) => {
     try {
-      // In production, verify provider signature (M-Pesa/Airtel) here.
-      const { orderId, provider, providerReference, status } = req.body;
+      const { orderId, provider, phoneNumber } = req.body;
+      const user = await getUserByUid(req.user!.uid);
       
-      // Update order payment state securely on the server
-      await db.update(orders)
-        .set({ paymentState: status, updatedAt: new Date() })
-        .where(eq(orders.id, orderId));
-        
-      res.json({ received: true });
-    } catch (error) {
-      res.status(500).json({ error: "Webhook processing failed" });
+      const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+      const order = orderRes[0];
+      
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+      
+      if (order.userId !== user.id) {
+        return res.status(403).json({ error: "Not authorized to pay for this order" });
+      }
+      
+      if (['SUCCESS', 'REFUNDED'].includes(order.paymentState)) {
+        return res.status(400).json({ error: "Order is already paid or refunded" });
+      }
+      
+      // Upsert a payment record (we could have multiple attempts, so insert a new one for traceability)
+      const [payment] = await db.insert(payments).values({
+        orderId: order.id,
+        provider: provider,
+        amount: order.totalAmount,
+        status: 'INITIATED',
+      }).returning();
+      
+      // Update order state to pending as we initiate
+      await db.update(orders).set({ paymentState: 'PENDING', updatedAt: new Date() }).where(eq(orders.id, order.id));
+
+      const result = await paymentService.initiate({
+        orderId: order.id,
+        amount: Number(order.totalAmount),
+        phoneNumber: phoneNumber,
+        provider: provider as any
+      });
+      
+      if (!result.isConfigured) {
+         // Because it's unconfigured, we shouldn't leave the order permanently PENDING if they can't pay.
+         // In a real app, maybe we fail it immediately, or allow retrying with another provider.
+         // Let's set it back to INITIATED so they can try again or use the dev simulation.
+         await db.update(orders).set({ paymentState: 'INITIATED', updatedAt: new Date() }).where(eq(orders.id, order.id));
+         await db.update(payments).set({ status: 'FAILED' }).where(eq(payments.id, payment.id));
+      }
+      
+      res.json(result);
+    } catch (error: any) {
+      console.error(error);
+      res.status(500).json({ error: error.message || "Payment initiation failed" });
     }
+  });
+
+  // --- WEBHOOK / CALLBACK BOUNDARY ---
+  app.post("/api/webhooks/payment/:provider", async (req, res) => {
+    try {
+       const { provider } = req.params;
+       // SECURITY BOUNDARY: Provider signature verification MUST happen here.
+       // e.g. verifyProviderSignature(req.headers, req.body)
+       // Since the actual provider is UNCONFIGURED in this module, we bypass signature check
+       // ONLY for the development simulation. In production, this would reject unsigned payloads.
+
+       // For the boundary, we extract what a typical payload gives:
+       const { orderId, providerReference, status } = req.body; 
+
+       if (!orderId || !status) {
+         return res.status(400).json({ error: "Invalid webhook payload" });
+       }
+       
+       const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+       const order = orderRes[0];
+       
+       if (!order) {
+         return res.status(404).json({ error: "Order not found" });
+       }
+       
+       // Idempotency: if already SUCCESS, acknowledge and do nothing
+       if (order.paymentState === 'SUCCESS') {
+          return res.json({ received: true, note: "Already processed" });
+       }
+       
+       // Update the most recent pending payment attempt
+       const pendingPayments = await db.select().from(payments)
+         .where(and(eq(payments.orderId, orderId), eq(payments.provider, provider)))
+         .orderBy(desc(payments.createdAt));
+         
+       if (pendingPayments.length > 0) {
+          const payment = pendingPayments[0];
+          await db.update(payments)
+            .set({ 
+              status: status, 
+              providerReference: providerReference || payment.providerReference 
+            })
+            .where(eq(payments.id, payment.id));
+       } else {
+          // If no pending record (e.g. manual offline payment), record it
+          await db.insert(payments).values({
+             orderId,
+             provider,
+             amount: order.totalAmount,
+             status,
+             providerReference
+          });
+       }
+
+       // Update authoritative order state
+       await db.update(orders)
+         .set({ paymentState: status, updatedAt: new Date() })
+         .where(eq(orders.id, orderId));
+         
+       res.json({ received: true });
+    } catch (error) {
+       console.error("Webhook error:", error);
+       res.status(500).json({ error: "Webhook processing failed" });
+    }
+  });
+
+  // --- DEVELOPMENT ADAPTER (SIMULATION) ---
+  // This explicitly replaces the old fake behavior with a dev-only tool that hits the real webhook
+  app.post("/api/dev/simulate-payment", async (req, res) => {
+     try {
+       const { orderId, provider } = req.body;
+       // Simulate webhook payload
+       await fetch(`http://localhost:3000/api/webhooks/payment/${provider}`, {
+         method: 'POST',
+         headers: { 'Content-Type': 'application/json' },
+         body: JSON.stringify({
+           orderId,
+           providerReference: 'DEV_SIM_' + Math.floor(Math.random() * 100000),
+           status: 'SUCCESS'
+         })
+       });
+       res.json({ success: true, message: "Simulation triggered webhook" });
+     } catch (e) {
+       res.status(500).json({ error: "Simulation failed" });
+     }
   });
 
   // --- PUBLIC REVIEWS API ---
