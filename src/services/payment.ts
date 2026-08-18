@@ -3,6 +3,25 @@
 export type PaymentState = 'INITIATED' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'CANCELLED' | 'REFUNDED';
 export type PaymentProvider = 'M-PESA' | 'AIRTEL_MONEY';
 
+export const VALID_PROVIDERS: PaymentProvider[] = ['M-PESA', 'AIRTEL_MONEY'];
+
+export function isValidProvider(provider: string): provider is PaymentProvider {
+  return VALID_PROVIDERS.includes(provider as PaymentProvider);
+}
+
+export function isValidPaymentTransition(from: PaymentState, to: PaymentState): boolean {
+  if (from === to) return false;
+  switch (from) {
+    case 'INITIATED': return ['PENDING', 'FAILED', 'CANCELLED'].includes(to);
+    case 'PENDING': return ['SUCCESS', 'FAILED', 'CANCELLED'].includes(to);
+    case 'SUCCESS': return ['REFUNDED'].includes(to);
+    case 'FAILED': return false;
+    case 'CANCELLED': return false;
+    case 'REFUNDED': return false;
+    default: return false;
+  }
+}
+
 export interface PaymentInitiationRequest {
   orderId: number;
   amount: number;
@@ -23,6 +42,15 @@ export interface PaymentVerificationResult {
   error?: string;
 }
 
+export interface PaymentWebhookVerificationResult {
+  success: boolean;
+  isConfigured: boolean;
+  orderId?: number;
+  status?: PaymentState;
+  providerReference?: string;
+  error?: string;
+}
+
 export interface PaymentRefundResult {
   success: boolean;
   isConfigured: boolean;
@@ -32,6 +60,7 @@ export interface PaymentRefundResult {
 export interface PaymentProviderAdapter {
   initiate(request: PaymentInitiationRequest): Promise<PaymentInitiationResult>;
   verify(providerReference: string): Promise<PaymentVerificationResult>;
+  verifyWebhook(payload: any, headers: any): Promise<PaymentWebhookVerificationResult>;
   refund(providerReference: string, amount: number): Promise<PaymentRefundResult>;
 }
 
@@ -51,6 +80,14 @@ export class MpesaAdapter implements PaymentProviderAdapter {
     return {
       status: 'PENDING',
       error: "M-Pesa verification is currently unconfigured."
+    };
+  }
+  
+  async verifyWebhook(payload: any, headers: any): Promise<PaymentWebhookVerificationResult> {
+    return {
+      success: false,
+      isConfigured: false,
+      error: "M-Pesa webhook verification is currently unconfigured."
     };
   }
 
@@ -78,6 +115,14 @@ export class AirtelMoneyAdapter implements PaymentProviderAdapter {
       error: "Airtel Money verification is currently unconfigured."
     };
   }
+  
+  async verifyWebhook(payload: any, headers: any): Promise<PaymentWebhookVerificationResult> {
+    return {
+      success: false,
+      isConfigured: false,
+      error: "Airtel Money webhook verification is currently unconfigured."
+    };
+  }
 
   async refund(providerReference: string, amount: number): Promise<PaymentRefundResult> {
     return {
@@ -101,9 +146,8 @@ export class PaymentService {
   }
 
   private getAdapter(provider: PaymentProvider): PaymentProviderAdapter {
-    const adapter = this.adapters[provider];
-    if (!adapter) throw new Error(`Provider ${provider} is not supported.`);
-    return adapter;
+    if (!isValidProvider(provider)) throw new Error(`Provider ${provider} is not supported.`);
+    return this.adapters[provider];
   }
 
   async initiate(request: PaymentInitiationRequest): Promise<PaymentInitiationResult> {
@@ -112,6 +156,10 @@ export class PaymentService {
 
   async verify(provider: PaymentProvider, providerReference: string): Promise<PaymentVerificationResult> {
     return this.getAdapter(provider).verify(providerReference);
+  }
+  
+  async verifyWebhook(provider: PaymentProvider, payload: any, headers: any): Promise<PaymentWebhookVerificationResult> {
+    return this.getAdapter(provider).verifyWebhook(payload, headers);
   }
 
   async refund(provider: PaymentProvider, providerReference: string, amount: number): Promise<PaymentRefundResult> {

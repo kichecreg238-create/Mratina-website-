@@ -773,58 +773,69 @@ async function startServer() {
   app.post("/api/webhooks/payment/:provider", async (req, res) => {
     try {
        const { provider } = req.params;
+       const { paymentService, isValidProvider, isValidPaymentTransition } = await import('./src/services/payment.ts');
+       
+       if (!isValidProvider(provider)) {
+         return res.status(400).json({ error: "Invalid provider" });
+       }
+
        // SECURITY BOUNDARY: Provider signature verification MUST happen here.
-       // e.g. verifyProviderSignature(req.headers, req.body)
-       // Since the actual provider is UNCONFIGURED in this module, we bypass signature check
-       // ONLY for the development simulation. In production, this would reject unsigned payloads.
-
-       // For the boundary, we extract what a typical payload gives:
-       const { orderId, providerReference, status } = req.body; 
-
-       if (!orderId || !status) {
-         return res.status(400).json({ error: "Invalid webhook payload" });
+       // We DO NOT trust req.body.status directly from the client.
+       const verification = await paymentService.verifyWebhook(provider, req.body, req.headers);
+       
+       if (!verification.isConfigured) {
+          return res.status(501).json({ error: "Provider unconfigured. Cannot process real webhooks." });
        }
        
-       const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+       if (!verification.success || !verification.orderId || !verification.status) {
+          return res.status(400).json({ error: verification.error || "Invalid webhook payload or signature" });
+       }
+       
+       const orderRes = await db.select().from(orders).where(eq(orders.id, verification.orderId));
        const order = orderRes[0];
        
        if (!order) {
          return res.status(404).json({ error: "Order not found" });
        }
        
-       // Idempotency: if already SUCCESS, acknowledge and do nothing
-       if (order.paymentState === 'SUCCESS') {
+       // Idempotency: if already in the target state, acknowledge and do nothing
+       if (order.paymentState === verification.status) {
           return res.json({ received: true, note: "Already processed" });
+       }
+       
+       // Enforce Payment State Machine
+       if (!isValidPaymentTransition(order.paymentState as any, verification.status)) {
+          return res.status(400).json({ error: "Invalid payment state transition" });
        }
        
        // Update the most recent pending payment attempt
        const pendingPayments = await db.select().from(payments)
-         .where(and(eq(payments.orderId, orderId), eq(payments.provider, provider)))
+         .where(and(eq(payments.orderId, order.id), eq(payments.provider, provider)))
          .orderBy(desc(payments.createdAt));
          
        if (pendingPayments.length > 0) {
           const payment = pendingPayments[0];
           await db.update(payments)
             .set({ 
-              status: status, 
-              providerReference: providerReference || payment.providerReference 
+              status: verification.status, 
+              providerReference: verification.providerReference || payment.providerReference 
             })
             .where(eq(payments.id, payment.id));
        } else {
           // If no pending record (e.g. manual offline payment), record it
           await db.insert(payments).values({
-             orderId,
+             orderId: order.id,
              provider,
              amount: order.totalAmount,
-             status,
-             providerReference
+             status: verification.status,
+             providerReference: verification.providerReference
           });
        }
 
        // Update authoritative order state
        await db.update(orders)
-         .set({ paymentState: status, updatedAt: new Date() })
-         .where(eq(orders.id, orderId));
+         .set({ paymentState: verification.status, updatedAt: new Date() })
+         .where(eq(orders.id, order.id));
          
        res.json({ received: true });
     } catch (error) {
@@ -834,22 +845,60 @@ async function startServer() {
   });
 
   // --- DEVELOPMENT ADAPTER (SIMULATION) ---
-  // This explicitly replaces the old fake behavior with a dev-only tool that hits the real webhook
+  // This explicitly replaces the old fake behavior with a dev-only tool.
+  // Because the production webhook securely rejects unconfigured providers,
+  // the simulator bypasses the webhook and updates the DB directly.
   app.post("/api/dev/simulate-payment", async (req, res) => {
+     if (process.env.NODE_ENV === 'production') {
+       return res.status(403).json({ error: "Simulation is not available in production." });
+     }
      try {
        const { orderId, provider } = req.body;
-       // Simulate webhook payload
-       await fetch(`http://localhost:3000/api/webhooks/payment/${provider}`, {
-         method: 'POST',
-         headers: { 'Content-Type': 'application/json' },
-         body: JSON.stringify({
-           orderId,
-           providerReference: 'DEV_SIM_' + Math.floor(Math.random() * 100000),
-           status: 'SUCCESS'
-         })
-       });
-       res.json({ success: true, message: "Simulation triggered webhook" });
+       const { isValidProvider, isValidPaymentTransition } = await import('./src/services/payment.ts');
+       
+       if (!isValidProvider(provider)) {
+         return res.status(400).json({ error: "Invalid provider" });
+       }
+       
+       const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+       const order = orderRes[0];
+       
+       if (!order) return res.status(404).json({ error: "Order not found" });
+       
+       // Force SUCCESS state transition bypassing standard provider webhook
+       if (!isValidPaymentTransition(order.paymentState as any, 'SUCCESS')) {
+          return res.status(400).json({ error: "Invalid payment state transition" });
+       }
+
+       const pendingPayments = await db.select().from(payments)
+         .where(and(eq(payments.orderId, order.id), eq(payments.provider, provider)))
+         .orderBy(desc(payments.createdAt));
+         
+       if (pendingPayments.length > 0) {
+          const payment = pendingPayments[0];
+          await db.update(payments)
+            .set({ 
+              status: 'SUCCESS', 
+              providerReference: 'DEV_SIM_' + Math.floor(Math.random() * 100000)
+            })
+            .where(eq(payments.id, payment.id));
+       } else {
+          await db.insert(payments).values({
+             orderId: order.id,
+             provider,
+             amount: order.totalAmount,
+             status: 'SUCCESS',
+             providerReference: 'DEV_SIM_' + Math.floor(Math.random() * 100000)
+          });
+       }
+
+       await db.update(orders)
+         .set({ paymentState: 'SUCCESS', updatedAt: new Date() })
+         .where(eq(orders.id, order.id));
+         
+       res.json({ success: true, message: "Simulation successful" });
      } catch (e) {
+       console.error("Simulation failed:", e);
        res.status(500).json({ error: "Simulation failed" });
      }
   });
