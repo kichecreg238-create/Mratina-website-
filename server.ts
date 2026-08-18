@@ -853,13 +853,18 @@ async function startServer() {
   // This explicitly replaces the old fake behavior with a dev-only tool.
   // Because the production webhook securely rejects unconfigured providers,
   // the simulator bypasses the webhook and updates the DB directly.
-  app.post("/api/dev/simulate-payment", requireAuth, async (req: AuthRequest, res) => {
+  app.post("/api/dev/simulate-payment", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
      if (process.env.NODE_ENV === 'production') {
        return res.status(403).json({ error: "Simulation is not available in production." });
      }
      try {
        const { orderId, provider } = req.body;
        const { isValidProvider, isValidPaymentTransition } = await import('./src/services/payment.ts');
+       
+       const user = await getUserByUid(req.user!.uid);
+       if (!user || user.role !== 'ADMIN') {
+          return res.status(403).json({ error: "Unauthorized. Only admins can simulate payments." });
+       }
        
        if (!isValidProvider(provider)) {
          return res.status(400).json({ error: "Invalid provider" });
@@ -869,6 +874,10 @@ async function startServer() {
        const order = orderRes[0];
        
        if (!order) return res.status(404).json({ error: "Order not found" });
+       
+       if (order.userId !== user.id) {
+          return res.status(403).json({ error: "Not authorized to simulate this order" });
+       }
        
        // Force SUCCESS state transition bypassing standard provider webhook
        if (!isValidPaymentTransition(order.paymentState as any, 'SUCCESS')) {
