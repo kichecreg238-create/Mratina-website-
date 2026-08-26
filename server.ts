@@ -484,11 +484,189 @@ async function startServer() {
   app.post("/api/admin/users/:id/role", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
       const userId = parseInt(req.params.id);
+      if (isNaN(userId)) return res.status(400).json({ error: "Invalid user ID" });
       const { role } = req.body;
+      const validRoles = ['CUSTOMER', 'ADMIN', 'DELIVERER'];
+      if (!role || !validRoles.includes(role)) {
+        return res.status(400).json({ error: "Invalid role specified" });
+      }
       await db.update(users).set({ role }).where(eq(users.id, userId));
       res.json({ success: true });
     } catch (error) {
       res.status(500).json({ error: "Failed to update role" });
+    }
+  });
+
+  app.post("/api/admin/deliverers/:id/availability", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const delivererId = parseInt(req.params.id);
+      if (isNaN(delivererId)) return res.status(400).json({ error: "Invalid deliverer ID" });
+      const { isAvailable } = req.body;
+      await db.update(users).set({ isAvailable: Boolean(isAvailable) }).where(and(eq(users.id, delivererId), eq(users.role, 'DELIVERER')));
+      res.json({ success: true });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to update deliverer availability" });
+    }
+  });
+
+  // --- ADMIN OVERVIEW API ---
+  app.get("/api/admin/overview", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const allOrders = await db.select().from(orders);
+      const allVariants = await db.select({
+        variant: variants,
+        product: products
+      })
+      .from(variants)
+      .leftJoin(products, eq(variants.productId, products.id));
+      
+      const allDeliverers = await db.select().from(users).where(eq(users.role, 'DELIVERER'));
+      const activeDeliveriesList = await db.select().from(deliveries).where(inArray(deliveries.status, ['ASSIGNED', 'ACCEPTED', 'PICKUP_READY', 'PICKED_UP', 'OUT_FOR_DELIVERY']));
+      
+      const totalOrders = allOrders.length;
+      const pendingOrders = allOrders.filter(o => o.status === 'PENDING').length;
+      const activeOrders = allOrders.filter(o => ['CONFIRMED', 'PROCESSING', 'PICKUP_READY', 'OUT_FOR_DELIVERY'].includes(o.status)).length;
+      const deliveredOrders = allOrders.filter(o => o.status === 'DELIVERED').length;
+      const cancelledOrders = allOrders.filter(o => o.status === 'CANCELLED').length;
+      const failedOrders = allOrders.filter(o => o.status === 'FAILED').length;
+
+      // Calculate total revenue from SUCCESS payments
+      const totalRevenue = allOrders
+        .filter(o => o.paymentState === 'SUCCESS')
+        .reduce((sum, o) => sum + Number(o.totalAmount || 0), 0);
+
+      // Payment states breakdown
+      const paymentStats = {
+        SUCCESS: allOrders.filter(o => o.paymentState === 'SUCCESS').length,
+        PENDING: allOrders.filter(o => o.paymentState === 'PENDING').length,
+        INITIATED: allOrders.filter(o => o.paymentState === 'INITIATED').length,
+        FAILED: allOrders.filter(o => o.paymentState === 'FAILED').length,
+        REFUNDED: allOrders.filter(o => o.paymentState === 'REFUNDED').length,
+      };
+
+      // Deliverer capacity
+      const availableDeliverers = allDeliverers.filter(d => d.isAvailable).length;
+
+      // Low stock variants (stock < 10)
+      const lowStockItems = allVariants
+        .filter(v => v.variant.stock < 10)
+        .map(v => ({
+          id: v.variant.id,
+          productId: v.variant.productId,
+          productName: v.product?.name || 'Unknown Product',
+          volume: v.variant.volume,
+          packaging: v.variant.packaging,
+          stock: v.variant.stock,
+          price: v.variant.price,
+          isActive: v.variant.isActive
+        }));
+
+      // Orders requiring attention: failed orders, failed payments, unassigned active orders
+      const attentionOrders = allOrders.filter(o => 
+        o.status === 'FAILED' || 
+        o.paymentState === 'FAILED' || 
+        (o.status === 'CONFIRMED' && !o.delivererId)
+      ).slice(0, 8);
+
+      res.json({
+        metrics: {
+          totalOrders,
+          pendingOrders,
+          activeOrders,
+          deliveredOrders,
+          cancelledOrders,
+          failedOrders,
+          totalRevenue: totalRevenue.toFixed(2),
+          activeDeliveries: activeDeliveriesList.length,
+          totalDeliverers: allDeliverers.length,
+          availableDeliverers,
+          lowStockCount: lowStockItems.length,
+        },
+        paymentStats,
+        lowStockItems: lowStockItems.slice(0, 10),
+        attentionOrders
+      });
+    } catch (error) {
+      console.error("Admin overview failed:", error);
+      res.status(500).json({ error: "Failed to generate overview metrics" });
+    }
+  });
+
+  // --- ADMIN PAYMENTS API ---
+  app.get("/api/admin/payments", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { provider, status } = req.query;
+
+      let paymentRows = await db.select({
+        payment: payments,
+        order: orders,
+        customerEmail: users.email
+      })
+      .from(payments)
+      .leftJoin(orders, eq(payments.orderId, orders.id))
+      .leftJoin(users, eq(orders.userId, users.id))
+      .orderBy(desc(payments.createdAt));
+
+      if (provider && typeof provider === 'string' && provider !== 'ALL') {
+        paymentRows = paymentRows.filter(r => r.payment.provider === provider);
+      }
+      if (status && typeof status === 'string' && status !== 'ALL') {
+        paymentRows = paymentRows.filter(r => r.payment.status === status);
+      }
+
+      const formatted = paymentRows.map(r => ({
+        ...r.payment,
+        orderTotal: r.order?.totalAmount,
+        orderStatus: r.order?.status,
+        orderZone: r.order?.deliveryZone,
+        customerEmail: r.customerEmail
+      }));
+
+      res.json({ payments: formatted });
+    } catch (error) {
+      console.error("Fetch payments failed:", error);
+      res.status(500).json({ error: "Failed to fetch payments" });
+    }
+  });
+
+  // --- ADMIN AUDIT LOGS API ---
+  app.get("/api/admin/audit-logs", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { orderId, action, actorRole } = req.query;
+
+      let logs = await db.select({
+        audit: orderAuditLogs,
+        actorEmail: users.email,
+        orderStatus: orders.status,
+        orderTotal: orders.totalAmount
+      })
+      .from(orderAuditLogs)
+      .leftJoin(users, eq(orderAuditLogs.actorId, users.id))
+      .leftJoin(orders, eq(orderAuditLogs.orderId, orders.id))
+      .orderBy(desc(orderAuditLogs.createdAt))
+      .limit(150);
+
+      if (orderId && typeof orderId === 'string' && !isNaN(parseInt(orderId))) {
+        logs = logs.filter(l => l.audit.orderId === parseInt(orderId));
+      }
+      if (action && typeof action === 'string' && action !== 'ALL') {
+        logs = logs.filter(l => l.audit.action === action);
+      }
+      if (actorRole && typeof actorRole === 'string' && actorRole !== 'ALL') {
+        logs = logs.filter(l => l.audit.actorRole === actorRole);
+      }
+
+      const formatted = logs.map(l => ({
+        ...l.audit,
+        actorEmail: l.actorEmail,
+        orderStatus: l.orderStatus,
+        orderTotal: l.orderTotal
+      }));
+
+      res.json({ auditLogs: formatted });
+    } catch (error) {
+      console.error("Fetch audit logs failed:", error);
+      res.status(500).json({ error: "Failed to fetch audit logs" });
     }
   });
 
@@ -510,7 +688,7 @@ async function startServer() {
 
   app.post("/api/admin/products", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
-      const { name, category, brand, origin, abv, description, imageBase64, isCustomisable } = req.body;
+      const { name, category, brand, origin, abv, description, imageBase64 } = req.body;
       
       // Validation
       if (!name || typeof name !== 'string' || name.trim().length === 0) {
@@ -539,6 +717,65 @@ async function startServer() {
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to create product" });
+    }
+  });
+
+  app.put("/api/admin/products/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      if (isNaN(productId)) return res.status(400).json({ error: "Invalid product ID" });
+
+      const { name, category, origin, abv, description, imageUrl, isActive } = req.body;
+
+      if (!name || typeof name !== 'string' || name.trim().length === 0) {
+        return res.status(400).json({ error: "Product name is required" });
+      }
+
+      const validCategories = ["WINE", "BEER", "SPIRITS", "MIXER", "OTHER"];
+      if (category && !validCategories.includes(category)) {
+        return res.status(400).json({ error: "Invalid product category" });
+      }
+
+      const [updatedProduct] = await db.update(products)
+        .set({
+          name: name.trim(),
+          category: category || undefined,
+          origin: origin !== undefined ? (origin?.trim() || null) : undefined,
+          abv: abv !== undefined ? (abv ? String(abv).trim() : null) : undefined,
+          description: description !== undefined ? (description?.trim() || null) : undefined,
+          imageUrl: imageUrl !== undefined ? imageUrl : undefined,
+          isActive: isActive !== undefined ? Boolean(isActive) : undefined,
+        })
+        .where(eq(products.id, productId))
+        .returning();
+
+      if (!updatedProduct) {
+        return res.status(404).json({ error: "Product not found" });
+      }
+
+      res.json({ success: true, product: updatedProduct });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to update product" });
+    }
+  });
+
+  app.post("/api/admin/products/:id/toggle", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      if (isNaN(productId)) return res.status(400).json({ error: "Invalid product ID" });
+
+      const productRes = await db.select().from(products).where(eq(products.id, productId));
+      if (productRes.length === 0) return res.status(404).json({ error: "Product not found" });
+
+      const [updated] = await db.update(products)
+        .set({ isActive: !productRes[0].isActive })
+        .where(eq(products.id, productId))
+        .returning();
+
+      res.json({ success: true, product: updated });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to toggle product status" });
     }
   });
 
@@ -591,14 +828,124 @@ async function startServer() {
     }
   });
 
+  app.put("/api/admin/variants/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const variantId = parseInt(req.params.id);
+      if (isNaN(variantId)) return res.status(400).json({ error: "Invalid variant ID" });
+
+      const { volume, packaging, price, stock, isActive } = req.body;
+
+      const updateData: any = {};
+      if (volume !== undefined && typeof volume === 'string' && volume.trim().length > 0) {
+        updateData.volume = volume.trim();
+      }
+      if (packaging !== undefined && typeof packaging === 'string' && packaging.trim().length > 0) {
+        updateData.packaging = packaging.trim();
+      }
+      if (price !== undefined) {
+        const numPrice = Number(price);
+        if (isNaN(numPrice) || numPrice <= 0) {
+          return res.status(400).json({ error: "Price must be greater than zero" });
+        }
+        updateData.price = numPrice.toString();
+      }
+      if (stock !== undefined) {
+        const numStock = parseInt(stock);
+        if (isNaN(numStock) || numStock < 0) {
+          return res.status(400).json({ error: "Stock must be a non-negative integer" });
+        }
+        updateData.stock = numStock;
+      }
+      if (isActive !== undefined) {
+        updateData.isActive = Boolean(isActive);
+      }
+
+      const [updatedVariant] = await db.update(variants)
+        .set(updateData)
+        .where(eq(variants.id, variantId))
+        .returning();
+
+      if (!updatedVariant) {
+        return res.status(404).json({ error: "Variant not found" });
+      }
+
+      res.json({ success: true, variant: updatedVariant });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to update variant" });
+    }
+  });
+
+  app.post("/api/admin/variants/:id/price", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const variantId = parseInt(req.params.id);
+      if (isNaN(variantId)) return res.status(400).json({ error: "Invalid variant ID" });
+
+      const { price } = req.body;
+      const numericPrice = Number(price);
+      if (isNaN(numericPrice) || numericPrice <= 0) {
+        return res.status(400).json({ error: "Price must be a valid number greater than zero" });
+      }
+
+      const [updatedVariant] = await db.update(variants)
+        .set({ price: numericPrice.toString() })
+        .where(eq(variants.id, variantId))
+        .returning();
+
+      if (!updatedVariant) {
+        return res.status(404).json({ error: "Variant not found" });
+      }
+
+      res.json({ success: true, variant: updatedVariant });
+    } catch (error) {
+      console.error(error);
+      res.status(500).json({ error: "Failed to update variant price" });
+    }
+  });
+
   app.post("/api/admin/variants/:id/stock", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
       const variantId = parseInt(req.params.id);
+      if (isNaN(variantId)) return res.status(400).json({ error: "Invalid variant ID" });
+
       const { stock } = req.body;
-      await db.update(variants).set({ stock: parseInt(stock) }).where(eq(variants.id, variantId));
-      res.json({ success: true });
+      const numStock = parseInt(stock);
+      if (isNaN(numStock) || numStock < 0) {
+        return res.status(400).json({ error: "Stock must be a valid non-negative integer" });
+      }
+
+      const [updatedVariant] = await db.update(variants)
+        .set({ stock: numStock })
+        .where(eq(variants.id, variantId))
+        .returning();
+
+      if (!updatedVariant) {
+        return res.status(404).json({ error: "Variant not found" });
+      }
+
+      res.json({ success: true, variant: updatedVariant });
     } catch (error) {
+      console.error(error);
       res.status(500).json({ error: "Failed to update stock" });
+    }
+  });
+
+  app.post("/api/admin/variants/:id/toggle", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const variantId = parseInt(req.params.id);
+      if (isNaN(variantId)) return res.status(400).json({ error: "Invalid variant ID" });
+
+      const variantRes = await db.select().from(variants).where(eq(variants.id, variantId));
+      if (variantRes.length === 0) return res.status(404).json({ error: "Variant not found" });
+
+      const [updated] = await db.update(variants)
+        .set({ isActive: !variantRes[0].isActive })
+        .where(eq(variants.id, variantId))
+        .returning();
+
+      res.json({ success: true, variant: updated });
+    } catch (error) {
+      res.status(500).json({ error: "Failed to toggle variant status" });
     }
   });
 
