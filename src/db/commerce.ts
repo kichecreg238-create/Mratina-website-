@@ -1,5 +1,5 @@
 import { db } from './index.ts';
-import { products, variants, orders, orderItems, deliveryZones, deliveries } from './schema.ts';
+import { products, variants, orders, orderItems, deliveryZones, deliveries, orderAuditLogs } from './schema.ts';
 import { eq, inArray } from 'drizzle-orm';
 
 export async function getActiveProducts() {
@@ -107,6 +107,23 @@ export async function createOrder(userId: number, items: { variantId: number; qu
     await tx.insert(deliveries).values({
       orderId: order.id,
       status: 'UNASSIGNED',
+    });
+
+    // Record initial audit event
+    await tx.insert(orderAuditLogs).values({
+      orderId: order.id,
+      actorId: userId,
+      actorRole: 'CUSTOMER',
+      action: 'CREATED',
+      fromState: null,
+      toState: 'PENDING',
+      reason: 'Order placed by customer',
+      metadata: {
+        totalAmount: grandTotal,
+        deliveryFee: authoritativeDeliveryFee,
+        deliveryZone: zone.name,
+        itemCount: items.length
+      }
     });
     
     return order;

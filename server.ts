@@ -5,9 +5,10 @@ import { requireAuth, requireRole, AuthRequest } from "./src/middleware/auth.ts"
 import { getOrCreateUser, getUserByUid } from "./src/db/users.ts";
 import { getActiveProducts, createOrder } from "./src/db/commerce.ts";
 import { db } from "./src/db/index.ts";
-import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries, payments } from "./src/db/schema.ts";
-import { eq, desc, inArray, and } from "drizzle-orm";
+import { orders, products, variants, users, orderItems, reviews, deliveryZones, deliveries, payments, orderAuditLogs } from "./src/db/schema.ts";
+import { eq, desc, inArray, and, or, ilike, sql } from "drizzle-orm";
 import { paymentService, isValidProvider } from "./src/services/payment.ts";
+import { orderOperationsService, OrderStatus } from "./src/services/orderOperations.ts";
 
 async function startServer() {
   const app = express();
@@ -130,6 +131,7 @@ async function startServer() {
       const orderIds = userOrders.map(o => o.id);
       let items: any[] = [];
       let deliveryRecords: any[] = [];
+      let paymentRecords: any[] = [];
       if (orderIds.length > 0) {
         items = await db.select({
           orderId: orderItems.orderId,
@@ -144,18 +146,71 @@ async function startServer() {
         .where(inArray(orderItems.orderId, orderIds));
 
         deliveryRecords = await db.select().from(deliveries).where(inArray(deliveries.orderId, orderIds));
+        paymentRecords = await db.select().from(payments).where(inArray(payments.orderId, orderIds)).orderBy(desc(payments.createdAt));
       }
 
       const ordersWithItems = userOrders.map(order => ({
         ...order,
         items: items.filter(i => i.orderId === order.id),
-        delivery: deliveryRecords.find(d => d.orderId === order.id) || null
+        delivery: deliveryRecords.find(d => d.orderId === order.id) || null,
+        payments: paymentRecords.filter(p => p.orderId === order.id)
       }));
 
       res.json({ orders: ordersWithItems });
     } catch (error: any) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch order history" });
+    }
+  });
+
+  // Get Single Order (Customer / Admin - Enforces Ownership)
+  app.get("/api/orders/:id", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const orderDetails = await orderOperationsService.getOrderById(orderId, user);
+      if (!orderDetails) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      res.json({ order: orderDetails });
+    } catch (error: any) {
+      console.error("Fetch order failed:", error);
+      if (error.message?.includes("Unauthorized")) {
+        return res.status(403).json({ error: "Unauthorized access to order" });
+      }
+      res.status(500).json({ error: error.message || "Failed to fetch order" });
+    }
+  });
+
+  // Cancel Order by Customer
+  app.post("/api/orders/:id/cancel", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order ID" });
+
+      const { reason } = req.body;
+      if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({ error: "A cancellation reason is required" });
+      }
+
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const updatedOrder = await orderOperationsService.cancelOrderByCustomer({
+        orderId,
+        userId: user.id,
+        reason: reason.trim()
+      });
+
+      res.json({ success: true, order: updatedOrder });
+    } catch (error: any) {
+      console.error("Cancel order failed:", error);
+      res.status(400).json({ error: error.message || "Failed to cancel order" });
     }
   });
 
@@ -244,11 +299,40 @@ async function startServer() {
   // --- ADMIN APIs ---
   app.get("/api/admin/orders", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
-      const allOrders = await db.select().from(orders).orderBy(desc(orders.createdAt));
+      const { status, paymentState, delivererId, search } = req.query;
+
+      let allOrders = await db.select({
+        order: orders,
+        customerEmail: users.email
+      })
+      .from(orders)
+      .leftJoin(users, eq(orders.userId, users.id))
+      .orderBy(desc(orders.createdAt));
+
+      if (status && typeof status === 'string') {
+        allOrders = allOrders.filter(row => row.order.status === status);
+      }
+      if (paymentState && typeof paymentState === 'string') {
+        allOrders = allOrders.filter(row => row.order.paymentState === paymentState);
+      }
+      if (delivererId && typeof delivererId === 'string') {
+        allOrders = allOrders.filter(row => row.order.delivererId === parseInt(delivererId));
+      }
+      if (search && typeof search === 'string' && search.trim().length > 0) {
+        const query = search.trim().toLowerCase();
+        allOrders = allOrders.filter(row => 
+          row.order.id.toString().includes(query) ||
+          (row.customerEmail && row.customerEmail.toLowerCase().includes(query)) ||
+          (row.order.deliveryAddress && row.order.deliveryAddress.toLowerCase().includes(query)) ||
+          (row.order.deliveryZone && row.order.deliveryZone.toLowerCase().includes(query)) ||
+          (row.order.landmark && row.order.landmark.toLowerCase().includes(query))
+        );
+      }
       
-      const orderIds = allOrders.map(o => o.id);
+      const orderIds = allOrders.map(o => o.order.id);
       let items: any[] = [];
       let deliveryRecords: any[] = [];
+      let paymentRecords: any[] = [];
       if (orderIds.length > 0) {
         items = await db.select({
           orderId: orderItems.orderId,
@@ -263,18 +347,119 @@ async function startServer() {
         .where(inArray(orderItems.orderId, orderIds));
 
         deliveryRecords = await db.select().from(deliveries).where(inArray(deliveries.orderId, orderIds));
+        paymentRecords = await db.select().from(payments).where(inArray(payments.orderId, orderIds)).orderBy(desc(payments.createdAt));
       }
 
-      const ordersWithItems = allOrders.map(order => ({
+      const ordersWithItems = allOrders.map(({ order, customerEmail }) => ({
         ...order,
+        customerEmail,
         items: items.filter(i => i.orderId === order.id),
-        delivery: deliveryRecords.find(d => d.orderId === order.id) || null
+        delivery: deliveryRecords.find(d => d.orderId === order.id) || null,
+        payments: paymentRecords.filter(p => p.orderId === order.id)
       }));
 
       res.json({ orders: ordersWithItems });
     } catch (error) {
       console.error(error);
       res.status(500).json({ error: "Failed to fetch orders" });
+    }
+  });
+
+  // Get Deep Order Details (Admin)
+  app.get("/api/admin/orders/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const orderDetails = await orderOperationsService.getOrderById(orderId, user);
+      if (!orderDetails) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      res.json({ order: orderDetails });
+    } catch (error: any) {
+      console.error("Admin fetch order details failed:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch order details" });
+    }
+  });
+
+  // Authoritative Order Status Transition (Admin)
+  app.post("/api/admin/orders/:id/order-status", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order ID" });
+
+      const { status, reason, metadata } = req.body;
+      if (!status) return res.status(400).json({ error: "New status is required" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updatedOrder = await orderOperationsService.transitionOrderStatus({
+        orderId,
+        newStatus: status as OrderStatus,
+        actor: user,
+        reason,
+        metadata
+      });
+
+      res.json({ success: true, order: updatedOrder });
+    } catch (error: any) {
+      console.error("Order status transition failed:", error);
+      res.status(400).json({ error: error.message || "Failed to transition order status" });
+    }
+  });
+
+  // Record Operational Exception / Note (Admin)
+  app.post("/api/admin/orders/:id/exception", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order ID" });
+
+      const { exceptionType, details, actionTaken } = req.body;
+      if (!exceptionType || !details) {
+        return res.status(400).json({ error: "Exception type and details are required" });
+      }
+
+      const user = await getUserByUid(req.user!.uid);
+      const audit = await orderOperationsService.recordOrderException({
+        orderId,
+        actor: user,
+        exceptionType,
+        details,
+        actionTaken
+      });
+
+      res.json({ success: true, audit });
+    } catch (error: any) {
+      console.error("Record exception failed:", error);
+      res.status(400).json({ error: error.message || "Failed to record exception" });
+    }
+  });
+
+  // Admin Cancel Order
+  app.post("/api/admin/orders/:id/cancel", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) return res.status(400).json({ error: "Invalid order ID" });
+
+      const { reason } = req.body;
+      if (!reason || typeof reason !== 'string' || reason.trim().length === 0) {
+        return res.status(400).json({ error: "A cancellation reason is required" });
+      }
+
+      const user = await getUserByUid(req.user!.uid);
+      const updatedOrder = await orderOperationsService.transitionOrderStatus({
+        orderId,
+        newStatus: 'CANCELLED',
+        actor: user,
+        reason: reason.trim(),
+        metadata: { initiatedBy: 'ADMIN_OVERRIDE' }
+      });
+
+      res.json({ success: true, order: updatedOrder });
+    } catch (error: any) {
+      console.error("Admin cancel failed:", error);
+      res.status(400).json({ error: error.message || "Failed to cancel order" });
     }
   });
 
@@ -474,6 +659,18 @@ async function startServer() {
         await db.update(orders).set({ 
           delivererId: finalDelivererId
         }).where(eq(orders.id, orderId));
+
+        // Audit log deliverer assignment
+        await orderOperationsService.recordAudit({
+          orderId,
+          actorId: user.id,
+          actorRole: 'ADMIN',
+          action: 'ASSIGNED',
+          fromState: delivery.delivererId ? `Deliverer #${delivery.delivererId}` : 'Unassigned',
+          toState: finalDelivererId ? `Deliverer #${finalDelivererId}` : 'Unassigned',
+          reason: finalDelivererId ? `Assigned to deliverer #${finalDelivererId}` : 'Unassigned deliverer',
+          metadata: { delivererId: finalDelivererId }
+        });
       }
 
       // If updating status
@@ -538,14 +735,35 @@ async function startServer() {
         if (status === 'UNASSIGNED') orderUpdates.delivererId = null;
         
         // Only sync terminal/major statuses that exist in order lifecycle
-        if (['DELIVERED', 'FAILED', 'CANCELLED'].includes(status)) {
+        if (['DELIVERED', 'FAILED', 'CANCELLED', 'OUT_FOR_DELIVERY', 'PICKUP_READY'].includes(status)) {
             orderUpdates.status = status;
         }
 
         await db.update(orders).set(orderUpdates).where(eq(orders.id, orderId));
+
+        // Audit log delivery status transition
+        await orderOperationsService.recordAudit({
+          orderId,
+          actorId: user.id,
+          actorRole: user.role === 'ADMIN' ? 'ADMIN' : 'DELIVERER',
+          action: 'DELIVERY_CHANGE',
+          fromState: currentState,
+          toState: status,
+          reason: failureReason || null,
+          metadata: { deliveryId: delivery.id, delivererId: delivery.delivererId }
+        });
       } else if (status && !delivery) {
          // Fallback for orders without deliveries created yet
          await db.update(orders).set({ status, updatedAt: new Date() }).where(eq(orders.id, orderId));
+         await orderOperationsService.recordAudit({
+          orderId,
+          actorId: user.id,
+          actorRole: user.role === 'ADMIN' ? 'ADMIN' : 'DELIVERER',
+          action: 'STATUS_CHANGE',
+          fromState: null,
+          toState: status,
+          reason: failureReason || null
+         });
       }
       
       res.json({ success: true });
@@ -841,6 +1059,40 @@ async function startServer() {
        await db.update(orders)
          .set({ paymentState: verification.status, updatedAt: new Date() })
          .where(eq(orders.id, order.id));
+
+       // Record payment audit log
+       await orderOperationsService.recordAudit({
+         orderId: order.id,
+         actorId: null,
+         actorRole: 'SYSTEM',
+         action: 'PAYMENT_STATE_CHANGE',
+         fromState: order.paymentState,
+         toState: verification.status,
+         reason: `Provider webhook notification: ${provider} -> ${verification.status}`,
+         metadata: {
+           provider,
+           providerReference: verification.providerReference,
+           amount: order.totalAmount
+         }
+       });
+
+       // If payment is SUCCESS and order is PENDING, auto-transition order to CONFIRMED
+       if (verification.status === 'SUCCESS' && order.status === 'PENDING') {
+         await db.update(orders)
+           .set({ status: 'CONFIRMED', updatedAt: new Date() })
+           .where(eq(orders.id, order.id));
+
+         await orderOperationsService.recordAudit({
+           orderId: order.id,
+           actorId: null,
+           actorRole: 'SYSTEM',
+           action: 'STATUS_CHANGE',
+           fromState: 'PENDING',
+           toState: 'CONFIRMED',
+           reason: 'Auto-confirmed upon verified payment receipt',
+           metadata: { trigger: 'WEBHOOK_PAYMENT_SUCCESS' }
+         });
+       }
          
        res.json({ received: true });
     } catch (error) {
@@ -909,6 +1161,40 @@ async function startServer() {
        await db.update(orders)
          .set({ paymentState: 'SUCCESS', updatedAt: new Date() })
          .where(eq(orders.id, order.id));
+
+       // Record payment audit log
+       await orderOperationsService.recordAudit({
+         orderId: order.id,
+         actorId: user.id,
+         actorRole: 'ADMIN',
+         action: 'PAYMENT_STATE_CHANGE',
+         fromState: order.paymentState,
+         toState: 'SUCCESS',
+         reason: `Development payment simulation: ${provider} -> SUCCESS`,
+         metadata: {
+           provider,
+           simulated: true,
+           amount: order.totalAmount
+         }
+       });
+
+       // If order is PENDING, auto-transition to CONFIRMED
+       if (order.status === 'PENDING') {
+         await db.update(orders)
+           .set({ status: 'CONFIRMED', updatedAt: new Date() })
+           .where(eq(orders.id, order.id));
+
+         await orderOperationsService.recordAudit({
+           orderId: order.id,
+           actorId: user.id,
+           actorRole: 'ADMIN',
+           action: 'STATUS_CHANGE',
+           fromState: 'PENDING',
+           toState: 'CONFIRMED',
+           reason: 'Auto-confirmed via dev payment simulation',
+           metadata: { trigger: 'SIMULATION_PAYMENT_SUCCESS' }
+         });
+       }
          
        res.json({ success: true, message: "Simulation successful" });
      } catch (e) {

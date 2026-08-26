@@ -117,6 +117,20 @@ export const orderItems = pgTable('order_items', {
   priceAtPurchase: decimal('price_at_purchase', { precision: 10, scale: 2 }).notNull(),
 });
 
+// Order Audit Logs / Events
+export const orderAuditLogs = pgTable('order_audit_logs', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id),
+  actorId: integer('actor_id').references(() => users.id),
+  actorRole: text('actor_role').notNull().default('SYSTEM'), // 'CUSTOMER', 'ADMIN', 'DELIVERER', 'SYSTEM'
+  action: text('action').notNull(), // 'CREATED', 'STATUS_CHANGE', 'PAYMENT_STATE_CHANGE', 'DELIVERY_CHANGE', 'EXCEPTION', 'CANCELLED'
+  fromState: text('from_state'),
+  toState: text('to_state'),
+  reason: text('reason'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Relations
 export const productsRelations = relations(products, ({ many }) => ({
   variants: many(variants),
@@ -138,6 +152,18 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
   delivery: one(deliveries, {
     fields: [orders.id],
     references: [deliveries.orderId]
+  }),
+  auditLogs: many(orderAuditLogs),
+}));
+
+export const orderAuditLogsRelations = relations(orderAuditLogs, ({ one }) => ({
+  order: one(orders, {
+    fields: [orderAuditLogs.orderId],
+    references: [orders.id],
+  }),
+  actor: one(users, {
+    fields: [orderAuditLogs.actorId],
+    references: [users.id],
   }),
 }));
 
