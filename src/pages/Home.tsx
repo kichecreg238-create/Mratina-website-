@@ -1,18 +1,45 @@
 import React, { useEffect, useState } from 'react';
 import { useCartStore } from '../store/useCartStore.ts';
 import { ProductModal } from '../components/ProductModal.tsx';
+import { Sparkles, ArrowRight, ShieldCheck, Clock, ExternalLink } from 'lucide-react';
+
+interface CMSContentState {
+  banners: Array<{
+    id: number;
+    title: string;
+    message: string;
+    mediaUrl: string | null;
+    ctaLabel: string | null;
+    ctaUrl: string | null;
+    displayOrder: number;
+  }>;
+  contentBlocks: Record<string, {
+    id: number;
+    title: string;
+    subtitle: string | null;
+    body: string | null;
+    mediaUrl: string | null;
+    ctaLabel: string | null;
+    ctaUrl: string | null;
+  }>;
+  visualSettings: Record<string, string>;
+}
 
 export const Home = () => {
   const [products, setProducts] = useState<any[]>([]);
+  const [cmsContent, setCmsContent] = useState<CMSContentState | null>(null);
   const [loading, setLoading] = useState(true);
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const addItem = useCartStore(state => state.addItem);
 
   useEffect(() => {
-    fetch('/api/products')
-      .then(r => r.json())
-      .then(data => {
-        if (data.products) setProducts(data.products);
+    Promise.all([
+      fetch('/api/products').then(r => r.json()).catch(() => ({ products: [] })),
+      fetch('/api/cms/content').then(r => r.json()).catch(() => null)
+    ])
+      .then(([prodData, cmsData]) => {
+        if (prodData.products) setProducts(prodData.products);
+        if (cmsData) setCmsContent(cmsData);
         setLoading(false);
       })
       .catch(e => {
@@ -33,19 +60,90 @@ export const Home = () => {
   const featured = products[0];
   const featuredVariant = featured?.variants?.[0];
 
+  const settings = cmsContent?.visualSettings || {};
+  const blocks = cmsContent?.contentBlocks || {};
+  const banners = cmsContent?.banners || [];
+
+  const heroHeadlineBlock = blocks.HERO_HEADLINE;
+  const heroStoryBlock = blocks.HERO_STORY;
+  const conciergeBlock = blocks.CONCIERGE_PROMISE;
+  const heritageBlock = blocks.HERITAGE_NOTE;
+  const terroirBlock = blocks.ABOUT_TERROIR;
+  const promoBlock = blocks.PROMO_FEATURE;
+
+  const heroBadge = settings.hero_badge || 'Featured Release';
+  const conciergeDeliveryNote = conciergeBlock?.body || settings.concierge_delivery_note || 'Available in Nairobi & Environs within 90 mins';
+  const heritageYear = heritageBlock?.title || settings.heritage_year || 'Since 2021';
+
   return (
-    <main className="flex-1 flex flex-col p-6 md:p-12 md:pt-24 relative overflow-y-auto min-h-0 h-full">
+    <main className="flex-1 flex flex-col p-6 md:p-12 md:pt-20 relative overflow-y-auto min-h-0 h-full scroll-smooth">
+      {/* Top Announcement Bar from CMS */}
+      {settings.announcement_banner_active === 'true' && settings.announcement_banner_text && (
+        <div className="mb-6 -mx-6 md:-mx-12 -mt-6 md:-mt-20 bg-gradient-to-r from-[#1a150b] via-[#2c2010] to-[#1a150b] border-b border-[#c5a059]/30 px-4 py-2.5 text-center text-xs tracking-wider uppercase flex items-center justify-center gap-2 text-[#c5a059]">
+          <Sparkles size={13} className="shrink-0" />
+          <span>{settings.announcement_banner_text}</span>
+          {settings.announcement_banner_url && (
+            <a
+              href={settings.announcement_banner_url}
+              className="ml-2 underline text-white hover:text-[#d4b271] font-mono text-[10px]"
+            >
+              Learn More →
+            </a>
+          )}
+        </div>
+      )}
+
+      {/* Published Campaigns & Banners */}
+      {banners.length > 0 && (
+        <div className="mb-10 grid grid-cols-1 md:grid-cols-2 gap-4">
+          {banners.map(banner => (
+            <div
+              key={banner.id}
+              className="p-5 bg-gradient-to-br from-white/5 to-white/[0.02] border border-[#c5a059]/30 rounded-sm relative overflow-hidden flex flex-col justify-between"
+            >
+              <div>
+                <span className="text-[9px] uppercase tracking-widest text-[#c5a059] font-mono block mb-1">
+                  Exclusive Allocation
+                </span>
+                <h4 className="text-base font-serif text-white font-medium">{banner.title}</h4>
+                <p className="text-xs text-white/70 leading-relaxed mt-2">{banner.message}</p>
+              </div>
+              {banner.ctaLabel && (
+                <div className="mt-4 pt-3 border-t border-white/5">
+                  <a
+                    href={banner.ctaUrl || '/'}
+                    className="inline-flex items-center gap-1.5 text-[10px] uppercase tracking-widest text-[#c5a059] hover:text-white transition-colors font-bold"
+                  >
+                    <span>{banner.ctaLabel}</span>
+                    <ArrowRight size={12} />
+                  </a>
+                </div>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Featured Release Hero Section */}
       {featured && featuredVariant && (
         <>
-          <header className="flex flex-col md:flex-row md:justify-between md:items-start mb-8 md:mb-12 gap-6 pt-12 md:pt-0">
+          <header className="flex flex-col md:flex-row md:justify-between md:items-start mb-8 md:mb-12 gap-6 pt-6 md:pt-0">
             <div>
-              <h2 className="text-xs uppercase tracking-[0.4em] text-[#c5a059] mb-4">Featured Release</h2>
+              <h2 className="text-xs uppercase tracking-[0.4em] text-[#c5a059] mb-4">
+                {heroHeadlineBlock?.subtitle || heroBadge}
+              </h2>
               <h3 
                 className="text-4xl md:text-6xl font-serif font-light text-white leading-tight cursor-pointer hover:text-[#c5a059] transition-colors"
                 onClick={() => setSelectedProduct(featured)}
               >
-                {featured.name.split(' ').slice(0,2).join(' ')}<br />
-                {featured.name.split(' ').slice(2).join(' ')}
+                {heroHeadlineBlock?.title ? (
+                  heroHeadlineBlock.title
+                ) : (
+                  <>
+                    {featured.name.split(' ').slice(0, 2).join(' ')}<br />
+                    {featured.name.split(' ').slice(2).join(' ')}
+                  </>
+                )}
               </h3>
             </div>
             <div className="flex flex-col md:items-end md:text-right">
@@ -69,13 +167,13 @@ export const Home = () => {
               
               <div className="absolute bottom-6 left-6 md:bottom-8 md:left-8 z-20 max-w-sm pr-6" onClick={(e) => e.stopPropagation()}>
                 <p className="text-sm text-white/60 leading-relaxed italic font-serif">
-                  '{featured.description}'
+                  '{heroStoryBlock?.body || featured.description}'
                 </p>
                 <button 
                   onClick={() => setSelectedProduct(featured)}
                   className="mt-6 px-6 py-3 md:px-8 md:py-3 bg-[#c5a059] hover:bg-[#d4b271] transition-colors text-[#050505] text-[10px] font-bold uppercase tracking-[0.2em] cursor-pointer"
                 >
-                  Select Variant
+                  {heroStoryBlock?.ctaLabel || 'Select Variant'}
                 </button>
               </div>
             </div>
@@ -100,13 +198,45 @@ export const Home = () => {
               </div>
               
               <div className="p-6 bg-[#c5a059]/5 border border-[#c5a059]/20 flex-1 flex flex-col justify-center text-center min-h-[160px]">
-                <span className="text-[9px] uppercase tracking-widest text-[#c5a059] mb-2">Delivery Service</span>
-                <p className="text-lg font-serif text-white">Concierge Delivery</p>
-                <p className="text-[11px] text-white/40 mt-2">Available in Nairobi & Environs within 90 mins</p>
+                <span className="text-[9px] uppercase tracking-widest text-[#c5a059] mb-2">
+                  {conciergeBlock?.subtitle || 'Delivery Service'}
+                </span>
+                <p className="text-lg font-serif text-white">
+                  {conciergeBlock?.title || 'Concierge Delivery'}
+                </p>
+                <p className="text-[11px] text-white/40 mt-2">
+                  {conciergeDeliveryNote}
+                </p>
               </div>
             </div>
           </section>
         </>
+      )}
+
+      {/* Published Terroir & Craft Section from CMS */}
+      {terroirBlock && (
+        <section className="mt-16 bg-white/[0.02] border border-white/10 p-8 md:p-12 rounded-sm">
+          <div className="max-w-3xl">
+            <span className="text-[9px] uppercase tracking-[0.3em] text-[#c5a059] block mb-2">
+              {terroirBlock.subtitle || 'Terroir & Botanical Craft'}
+            </span>
+            <h3 className="text-2xl md:text-3xl font-serif text-white font-light mb-4">
+              {terroirBlock.title}
+            </h3>
+            <p className="text-sm text-white/60 leading-relaxed font-serif">
+              {terroirBlock.body}
+            </p>
+            {terroirBlock.ctaLabel && (
+              <a
+                href={terroirBlock.ctaUrl || '/'}
+                className="mt-6 inline-flex items-center gap-2 text-xs uppercase tracking-widest text-[#c5a059] hover:underline"
+              >
+                <span>{terroirBlock.ctaLabel}</span>
+                <ArrowRight size={13} />
+              </a>
+            )}
+          </div>
+        </section>
       )}
 
       {/* The Collection */}
@@ -141,11 +271,42 @@ export const Home = () => {
         </section>
       )}
 
+      {/* Seasonal Promo & Collector Allocation Feature from CMS */}
+      {promoBlock && (
+        <section className="mb-12 p-8 bg-gradient-to-r from-[#16120c] to-[#0a0a0a] border border-[#c5a059]/25 flex flex-col md:flex-row items-center justify-between gap-6">
+          <div>
+            <span className="text-[9px] uppercase tracking-[0.3em] text-[#c5a059] font-mono">
+              {promoBlock.subtitle || 'Special Collector Allocation'}
+            </span>
+            <h3 className="text-xl md:text-2xl font-serif text-white mt-1">
+              {promoBlock.title}
+            </h3>
+            {promoBlock.body && (
+              <p className="text-xs text-white/60 mt-2 max-w-xl font-serif">
+                {promoBlock.body}
+              </p>
+            )}
+          </div>
+          {promoBlock.ctaLabel && (
+            <a
+              href={promoBlock.ctaUrl || '/'}
+              className="px-6 py-3 bg-[#c5a059] hover:bg-[#d4b271] text-black text-xs uppercase font-bold tracking-widest whitespace-nowrap transition-colors"
+            >
+              {promoBlock.ctaLabel}
+            </a>
+          )}
+        </section>
+      )}
+
       <footer className="mt-12 md:mt-24 flex flex-col md:flex-row justify-between md:items-end gap-6 shrink-0 pb-8 md:pb-0">
         <div className="flex gap-8">
           <div className="text-left">
-            <span className="block text-[9px] text-white/30 uppercase tracking-widest mb-1">Heritage</span>
-            <span className="text-xs text-white/70">Since 2021</span>
+            <span className="block text-[9px] text-white/30 uppercase tracking-widest mb-1">
+              {heritageBlock?.subtitle || 'Heritage'}
+            </span>
+            <span className="text-xs text-white/70">
+              {heritageYear}
+            </span>
           </div>
           <div className="text-left">
             <span className="block text-[9px] text-white/30 uppercase tracking-widest mb-1">Status</span>
@@ -156,7 +317,7 @@ export const Home = () => {
           </div>
         </div>
         <div className="text-[10px] text-white/20 uppercase tracking-[0.3em]">
-          Mratina Reserve &copy; 2024
+          {settings.site_title || 'Mratina Reserve'} &copy; {new Date().getFullYear()}
         </div>
       </footer>
       

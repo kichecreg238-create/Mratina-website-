@@ -28,8 +28,11 @@ import {
   MapPin,
   Activity,
   FileText,
-  Lock
+  Lock,
+  Sliders
 } from 'lucide-react';
+
+import { AdminCMSPanel } from '../components/AdminCMSPanel.tsx';
 
 export type AdminTab =
   | 'OVERVIEW'
@@ -40,6 +43,7 @@ export type AdminTab =
   | 'DELIVERY'
   | 'PAYMENTS'
   | 'STAFF'
+  | 'CMS'
   | 'AUDIT';
 
 export const AdminDashboard = () => {
@@ -673,6 +677,7 @@ export const AdminDashboard = () => {
           { id: 'DELIVERY', label: 'Delivery', icon: Truck, count: overview?.metrics?.activeDeliveries },
           { id: 'PAYMENTS', label: 'Payments', icon: CreditCard, count: paymentsList.length },
           { id: 'STAFF', label: 'Staff / Deliverers', icon: Users, count: deliverers.length },
+          { id: 'CMS', label: 'CMS & Visuals', icon: Sliders },
           { id: 'AUDIT', label: 'Audit Ledger', icon: FileText, count: auditLogsList.length }
         ].map(tab => {
           const Icon = tab.icon;
@@ -1673,6 +1678,24 @@ export const AdminDashboard = () => {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* 10. CMS & VISUAL CONTENT CONTROL TAB */}
+        {activeTab === 'CMS' && (
+          <div className="space-y-6">
+            <div className="border-b border-white/10 pb-4 flex items-center justify-between">
+              <div>
+                <h2 className="text-base font-serif text-white uppercase tracking-wider flex items-center gap-2">
+                  <Sliders className="w-4 h-4 text-[#c5a059]" />
+                  Visual Content & Storefront CMS
+                </h2>
+                <p className="text-xs text-white/50 mt-1">
+                  Manage draft & published banners, narrative blocks, and branding controls safely.
+                </p>
+              </div>
+            </div>
+            <AdminCMSPanel />
           </div>
         )}
       </main>

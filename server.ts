@@ -9,6 +9,7 @@ import { orders, products, variants, users, orderItems, reviews, deliveryZones, 
 import { eq, desc, inArray, and, or, ilike, sql } from "drizzle-orm";
 import { paymentService, isValidProvider } from "./src/services/payment.ts";
 import { orderOperationsService, OrderStatus } from "./src/services/orderOperations.ts";
+import { cmsService } from "./src/services/cmsService.ts";
 
 async function startServer() {
   const app = express();
@@ -667,6 +668,259 @@ async function startServer() {
     } catch (error) {
       console.error("Fetch audit logs failed:", error);
       res.status(500).json({ error: "Failed to fetch audit logs" });
+    }
+  });
+
+  // ===================================================
+  // --- MODULE 17: CMS / VISUAL & CONTENT CONTROL ---
+  // ===================================================
+
+  // 1. Storefront Public Published CMS Content (Public / Guest accessible)
+  app.get("/api/cms/content", async (req, res) => {
+    try {
+      const content = await cmsService.getPublishedStorefrontContent();
+      res.json(content);
+    } catch (error: any) {
+      console.error("Failed to fetch public CMS content:", error);
+      // Fallback empty data gracefully on error so storefront continues working
+      res.json({
+        banners: [],
+        blocks: [],
+        blocksBySection: {},
+        visualSettings: {
+          site_title: 'MRATINA',
+          tagline: 'Sacred Kenyan Craft & Terroir',
+          hero_badge: 'Featured Release',
+          accent_theme: 'gold',
+          concierge_delivery_note: 'Available in Nairobi & Environs within 90 mins',
+          heritage_year: 'Since 2021',
+          announcement_banner_active: 'false',
+          announcement_banner_text: 'Complimentary sommelier gift packaging on orders above KES 5,000',
+          announcement_banner_url: '/'
+        }
+      });
+    }
+  });
+
+  // 2. Admin Banners Endpoints
+  app.get("/api/admin/cms/banners", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const banners = await cmsService.getAllBanners();
+      res.json({ banners });
+    } catch (error: any) {
+      console.error("Failed to fetch CMS banners:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch banners" });
+    }
+  });
+
+  app.post("/api/admin/cms/banners", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      const newBanner = await cmsService.createBanner(req.body, user.id);
+      res.json({ success: true, banner: newBanner });
+    } catch (error: any) {
+      console.error("Failed to create CMS banner:", error);
+      res.status(400).json({ error: error.message || "Failed to create banner" });
+    }
+  });
+
+  app.put("/api/admin/cms/banners/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const bannerId = parseInt(req.params.id);
+      if (isNaN(bannerId)) return res.status(400).json({ error: "Invalid banner ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.updateBanner(bannerId, req.body, user.id);
+      res.json({ success: true, banner: updated });
+    } catch (error: any) {
+      console.error("Failed to update CMS banner:", error);
+      res.status(400).json({ error: error.message || "Failed to update banner" });
+    }
+  });
+
+  app.post("/api/admin/cms/banners/:id/publish", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const bannerId = parseInt(req.params.id);
+      if (isNaN(bannerId)) return res.status(400).json({ error: "Invalid banner ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.setBannerPublishStatus(bannerId, 'PUBLISHED', user.id);
+      res.json({ success: true, banner: updated });
+    } catch (error: any) {
+      console.error("Failed to publish banner:", error);
+      res.status(400).json({ error: error.message || "Failed to publish banner" });
+    }
+  });
+
+  app.post("/api/admin/cms/banners/:id/unpublish", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const bannerId = parseInt(req.params.id);
+      if (isNaN(bannerId)) return res.status(400).json({ error: "Invalid banner ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.setBannerPublishStatus(bannerId, 'DRAFT', user.id);
+      res.json({ success: true, banner: updated });
+    } catch (error: any) {
+      console.error("Failed to unpublish banner:", error);
+      res.status(400).json({ error: error.message || "Failed to unpublish banner" });
+    }
+  });
+
+  app.post("/api/admin/cms/banners/:id/toggle", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const bannerId = parseInt(req.params.id);
+      if (isNaN(bannerId)) return res.status(400).json({ error: "Invalid banner ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.toggleBannerActive(bannerId, user.id);
+      res.json({ success: true, banner: updated });
+    } catch (error: any) {
+      console.error("Failed to toggle banner active state:", error);
+      res.status(400).json({ error: error.message || "Failed to toggle banner active state" });
+    }
+  });
+
+  app.delete("/api/admin/cms/banners/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const bannerId = parseInt(req.params.id);
+      if (isNaN(bannerId)) return res.status(400).json({ error: "Invalid banner ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const result = await cmsService.deleteBanner(bannerId, user.id);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to delete banner:", error);
+      res.status(400).json({ error: error.message || "Failed to delete banner" });
+    }
+  });
+
+  // 3. Admin Content Blocks Endpoints
+  app.get("/api/admin/cms/blocks", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const blocks = await cmsService.getAllContentBlocks();
+      res.json({ blocks });
+    } catch (error: any) {
+      console.error("Failed to fetch CMS content blocks:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch content blocks" });
+    }
+  });
+
+  app.post("/api/admin/cms/blocks", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      const newBlock = await cmsService.createContentBlock(req.body, user.id);
+      res.json({ success: true, block: newBlock });
+    } catch (error: any) {
+      console.error("Failed to create CMS block:", error);
+      res.status(400).json({ error: error.message || "Failed to create content block" });
+    }
+  });
+
+  app.put("/api/admin/cms/blocks/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const blockId = parseInt(req.params.id);
+      if (isNaN(blockId)) return res.status(400).json({ error: "Invalid block ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.updateContentBlock(blockId, req.body, user.id);
+      res.json({ success: true, block: updated });
+    } catch (error: any) {
+      console.error("Failed to update CMS block:", error);
+      res.status(400).json({ error: error.message || "Failed to update content block" });
+    }
+  });
+
+  app.post("/api/admin/cms/blocks/:id/publish", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const blockId = parseInt(req.params.id);
+      if (isNaN(blockId)) return res.status(400).json({ error: "Invalid block ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.setBlockPublishStatus(blockId, 'PUBLISHED', user.id);
+      res.json({ success: true, block: updated });
+    } catch (error: any) {
+      console.error("Failed to publish block:", error);
+      res.status(400).json({ error: error.message || "Failed to publish content block" });
+    }
+  });
+
+  app.post("/api/admin/cms/blocks/:id/unpublish", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const blockId = parseInt(req.params.id);
+      if (isNaN(blockId)) return res.status(400).json({ error: "Invalid block ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.setBlockPublishStatus(blockId, 'DRAFT', user.id);
+      res.json({ success: true, block: updated });
+    } catch (error: any) {
+      console.error("Failed to unpublish block:", error);
+      res.status(400).json({ error: error.message || "Failed to unpublish content block" });
+    }
+  });
+
+  app.post("/api/admin/cms/blocks/:id/toggle", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const blockId = parseInt(req.params.id);
+      if (isNaN(blockId)) return res.status(400).json({ error: "Invalid block ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.toggleBlockActive(blockId, user.id);
+      res.json({ success: true, block: updated });
+    } catch (error: any) {
+      console.error("Failed to toggle block active state:", error);
+      res.status(400).json({ error: error.message || "Failed to toggle content block active state" });
+    }
+  });
+
+  app.delete("/api/admin/cms/blocks/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const blockId = parseInt(req.params.id);
+      if (isNaN(blockId)) return res.status(400).json({ error: "Invalid block ID" });
+
+      const user = await getUserByUid(req.user!.uid);
+      const result = await cmsService.deleteBlock(blockId, user.id);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to delete content block:", error);
+      res.status(400).json({ error: error.message || "Failed to delete content block" });
+    }
+  });
+
+  // 4. Admin Visual Settings Endpoints
+  app.get("/api/admin/cms/visual-settings", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const settings = await cmsService.getAllVisualSettings();
+      res.json({ settings });
+    } catch (error: any) {
+      console.error("Failed to fetch visual settings:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch visual settings" });
+    }
+  });
+
+  app.put("/api/admin/cms/visual-settings", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { settings } = req.body;
+      if (!settings || typeof settings !== 'object') {
+        return res.status(400).json({ error: "Settings object is required" });
+      }
+
+      const user = await getUserByUid(req.user!.uid);
+      const updated = await cmsService.updateVisualSettings(settings, user.id);
+      res.json({ success: true, settings: updated });
+    } catch (error: any) {
+      console.error("Failed to update visual settings:", error);
+      res.status(400).json({ error: error.message || "Failed to update visual settings" });
+    }
+  });
+
+  // 5. Admin CMS Audit Logs Endpoint
+  app.get("/api/admin/cms/audit-logs", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const logs = await cmsService.getCMSAuditLogs(100);
+      res.json({ logs });
+    } catch (error: any) {
+      console.error("Failed to fetch CMS audit logs:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch CMS audit logs" });
     }
   });
 

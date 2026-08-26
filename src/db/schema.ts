@@ -117,6 +117,61 @@ export const orderItems = pgTable('order_items', {
   priceAtPurchase: decimal('price_at_purchase', { precision: 10, scale: 2 }).notNull(),
 });
 
+// CMS Banners (Promotions, Announcements)
+export const cmsBanners = pgTable('cms_banners', {
+  id: serial('id').primaryKey(),
+  title: text('title').notNull(),
+  message: text('message').notNull(),
+  mediaUrl: text('media_url'),
+  ctaLabel: text('cta_label'),
+  ctaUrl: text('cta_url'),
+  displayOrder: integer('display_order').default(0).notNull(),
+  status: text('status').notNull().default('DRAFT'), // DRAFT, PUBLISHED
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// CMS Content Blocks (Predefined storefront sections)
+export const cmsContentBlocks = pgTable('cms_content_blocks', {
+  id: serial('id').primaryKey(),
+  sectionKey: text('section_key').notNull(), // 'HERO_HEADLINE', 'HERO_STORY', 'CONCIERGE_PROMISE', 'HERITAGE_NOTE', 'PROMO_FEATURE'
+  title: text('title').notNull(),
+  subtitle: text('subtitle'),
+  body: text('body'),
+  mediaUrl: text('media_url'),
+  ctaLabel: text('cta_label'),
+  ctaUrl: text('cta_url'),
+  displayOrder: integer('display_order').default(0).notNull(),
+  status: text('status').notNull().default('DRAFT'), // DRAFT, PUBLISHED
+  isActive: boolean('is_active').default(true).notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// CMS Visual & Brand Settings (Safe typed configuration values)
+export const cmsVisualSettings = pgTable('cms_visual_settings', {
+  id: serial('id').primaryKey(),
+  key: text('key').notNull().unique(), // 'store_tagline', 'concierge_delivery_note', 'heritage_year', 'accent_theme', 'announcement_text', 'announcement_active'
+  value: text('value').notNull(),
+  category: text('category').notNull().default('GENERAL'), // 'BRAND', 'THEME', 'DELIVERY_PROMO', 'ANNOUNCEMENT'
+  isPublished: boolean('is_published').default(true).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// CMS Audit Logs (Auditability for all CMS & visual changes)
+export const cmsAuditLogs = pgTable('cms_audit_logs', {
+  id: serial('id').primaryKey(),
+  actorId: integer('actor_id').references(() => users.id),
+  actorRole: text('actor_role').notNull().default('ADMIN'),
+  action: text('action').notNull(), // 'CREATE_BANNER', 'UPDATE_BANNER', 'PUBLISH_BANNER', 'DELETE_BANNER', 'CREATE_BLOCK', 'UPDATE_BLOCK', 'PUBLISH_BLOCK', 'DELETE_BLOCK', 'UPDATE_VISUAL_SETTINGS'
+  targetType: text('target_type').notNull(), // 'BANNER', 'CONTENT_BLOCK', 'VISUAL_SETTINGS'
+  targetId: text('target_id'),
+  details: text('details'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Order Audit Logs / Events
 export const orderAuditLogs = pgTable('order_audit_logs', {
   id: serial('id').primaryKey(),
