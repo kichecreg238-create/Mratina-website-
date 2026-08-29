@@ -195,7 +195,7 @@ export const OrderHistory = () => {
                               className="px-2.5 py-1 bg-[#c5a059]/10 hover:bg-[#c5a059]/20 text-[#c5a059] border border-[#c5a059]/30 text-[10px] uppercase font-mono tracking-wider flex items-center gap-1 transition-colors"
                             >
                               <Star size={11} className="fill-current" />
-                              Review Reserve
+                              Review Product
                             </button>
                           )}
                         </div>

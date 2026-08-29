@@ -118,7 +118,7 @@ export class ReviewService {
             createdAt: existing.createdAt,
           }
         : null,
-      reason: isEligible ? undefined : 'Only customers with a delivered purchase of this reserve may submit a review.',
+      reason: isEligible ? undefined : 'Only customers with a delivered purchase of this product may submit a review.',
     };
   }
 
@@ -443,7 +443,7 @@ export class ReviewService {
       reviewId,
       actorId: actor.id,
       actorRole: 'ADMIN',
-      action: action === 'APPROVE' ? 'APPROVED' : 'REJECTED',
+      action: action === 'APPROVE' ? 'APPROVED' : action === 'HIDE' ? 'HIDE' : 'REJECTED',
       fromStatus: existing.status,
       toStatus: newStatus,
       reason: rejectionReason || `Review ${action.toLowerCase()}d by admin`,

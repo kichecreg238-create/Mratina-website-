@@ -242,10 +242,10 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
             {/* Reviews Header & Scorecard */}
             <div>
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-[10px] uppercase tracking-widest text-[#c5a059]">Verified Patron Reviews</h3>
+                <h3 className="text-[10px] uppercase tracking-widest text-[#c5a059]">Verified Customer Reviews</h3>
                 {stats.reviewCount > 0 && (
                   <span className="text-[10px] font-mono text-white/40">
-                    {stats.reviewCount} Certified {stats.reviewCount === 1 ? 'Rating' : 'Ratings'}
+                    {stats.reviewCount} {stats.reviewCount === 1 ? 'Rating' : 'Ratings'}
                   </span>
                 )}
               </div>
@@ -286,7 +286,7 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
               {loading ? (
                 <div className="text-white/40 text-xs py-4 font-mono">Loading verified reviews...</div>
               ) : reviews.length === 0 ? (
-                <div className="text-white/40 text-xs italic py-4">No published reviews yet. Be the first verified patron to review.</div>
+                <div className="text-white/40 text-xs italic py-4">No published reviews yet. Be the first verified customer to review.</div>
               ) : (
                 <div className="space-y-3">
                   {reviews.map(r => (
@@ -410,7 +410,7 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
                       <textarea
                         maxLength={1000}
                         className="w-full bg-[#111] border border-white/10 text-white p-3 text-xs focus:outline-none focus:border-[#c5a059] min-h-[90px]"
-                        placeholder="Describe the aroma, palate, oak aging notes, or pairing impressions..."
+                        placeholder="Share your experience with this product..."
                         value={comment}
                         onChange={(e) => setComment(e.target.value)}
                       />
@@ -424,7 +424,7 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
                       {submitting ? 'Submitting...' : existingReview ? 'Update Review' : 'Submit Review'}
                     </button>
                     <p className="text-[9px] font-mono text-white/30 text-center">
-                      All patron reviews undergo moderation verification prior to public storefront display.
+                      All customer reviews undergo moderation verification prior to public storefront display.
                     </p>
                   </form>
                 ) : (
@@ -432,13 +432,13 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
                     <ShieldCheck size={20} className="text-white/30 mx-auto mb-2" />
                     <p className="text-xs text-white/80 font-serif mb-1">Purchase Verification Required</p>
                     <p className="text-[10px] text-white/40 leading-relaxed font-mono">
-                      To preserve authentic terroir ratings, only patrons with a delivered order containing this reserve can submit reviews.
+                      To ensure authentic reviews, only customers with a delivered purchase of this product can submit a review.
                     </p>
                   </div>
                 )
               ) : (
                 <div className="bg-white/[0.02] border border-white/5 p-4 text-center">
-                  <p className="text-[10px] uppercase tracking-widest text-white/50 mb-1">Authentic Patron Reviews</p>
+                  <p className="text-[10px] uppercase tracking-widest text-white/50 mb-1">Customer Reviews</p>
                   <p className="text-xs text-white/40 font-mono">
                     Please sign in with your account to leave a verified review.
                   </p>

@@ -230,7 +230,7 @@ export const AdminReviewsPanel: React.FC = () => {
             Reviews & Ratings Moderation
           </h2>
           <p className="text-xs text-white/50 font-mono mt-0.5">
-            Module 18 — Customer Verified Reviews, Terroir Ratings & Moderation Lifecycle
+            Module 18 — Customer Verified Reviews, Ratings & Moderation Lifecycle
           </p>
         </div>
 
