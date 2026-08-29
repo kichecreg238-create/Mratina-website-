@@ -692,7 +692,7 @@ async function startServer() {
           tagline: 'Sacred Kenyan Craft & Terroir',
           hero_badge: 'Featured Release',
           accent_theme: 'gold',
-          concierge_delivery_note: 'Available in Nairobi & Environs within 90 mins',
+          concierge_delivery_note: 'Serving Kakamega town and nearby serviceable areas.',
           heritage_year: 'Since 2021',
           announcement_banner_active: 'false',
           announcement_banner_text: 'Complimentary sommelier gift packaging on orders above KES 5,000',

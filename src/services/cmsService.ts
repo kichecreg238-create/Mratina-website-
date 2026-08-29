@@ -45,7 +45,7 @@ export const DEFAULT_VISUAL_SETTINGS: Record<SettingKey, { value: string; catego
   tagline: { value: 'Sacred Kenyan Craft & Terroir', category: 'BRAND' },
   hero_badge: { value: 'Featured Release', category: 'BRAND' },
   accent_theme: { value: 'gold', category: 'THEME' },
-  concierge_delivery_note: { value: 'Available in Nairobi & Environs within 90 mins', category: 'DELIVERY_PROMO' },
+  concierge_delivery_note: { value: 'Serving Kakamega town and nearby serviceable areas.', category: 'DELIVERY_PROMO' },
   heritage_year: { value: 'Since 2021', category: 'BRAND' },
   announcement_banner_active: { value: 'false', category: 'ANNOUNCEMENT' },
   announcement_banner_text: { value: 'Complimentary sommelier gift packaging on orders above KES 5,000', category: 'ANNOUNCEMENT' },
@@ -192,7 +192,8 @@ export class CMSService {
     const mediaUrl = data.mediaUrl ? sanitizeSafeUrl(data.mediaUrl) : null;
     const ctaLabel = data.ctaLabel ? sanitizeText(data.ctaLabel, 50) : null;
     const displayOrder = typeof data.displayOrder === 'number' ? data.displayOrder : 0;
-    const status = data.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT';
+    // Lifecycle Rule: Ordinary create ALWAYS produces DRAFT. Explicit publish endpoint is required for publication.
+    const status: 'DRAFT' = 'DRAFT';
     const isActive = data.isActive !== undefined ? Boolean(data.isActive) : true;
 
     const [newBanner] = await db.insert(cmsBanners).values({
@@ -212,7 +213,7 @@ export class CMSService {
       action: 'CREATE_BANNER',
       targetType: 'BANNER',
       targetId: newBanner.id.toString(),
-      details: `Created banner "${newBanner.title}" [${newBanner.status}]`,
+      details: `Created banner "${newBanner.title}" [DRAFT]`,
       metadata: { bannerId: newBanner.id, status: newBanner.status }
     });
 
@@ -240,10 +241,7 @@ export class CMSService {
     if (data.ctaLabel !== undefined) updateFields.ctaLabel = data.ctaLabel ? sanitizeText(data.ctaLabel, 50) : null;
     if (data.ctaUrl !== undefined) updateFields.ctaUrl = data.ctaUrl ? sanitizeSafeUrl(data.ctaUrl) : null;
     if (data.displayOrder !== undefined) updateFields.displayOrder = Number(data.displayOrder) || 0;
-    if (data.status !== undefined) {
-      if (!['DRAFT', 'PUBLISHED'].includes(data.status)) throw new Error('Invalid status.');
-      updateFields.status = data.status;
-    }
+    // Lifecycle Rule: Ordinary update NEVER alters publication status. Status transitions require explicit setBannerPublishStatus.
     if (data.isActive !== undefined) updateFields.isActive = Boolean(data.isActive);
 
     const [updated] = await db.update(cmsBanners).set(updateFields).where(eq(cmsBanners.id, id)).returning();
@@ -358,7 +356,8 @@ export class CMSService {
     const mediaUrl = data.mediaUrl ? sanitizeSafeUrl(data.mediaUrl) : null;
     const ctaLabel = data.ctaLabel ? sanitizeText(data.ctaLabel, 50) : null;
     const displayOrder = typeof data.displayOrder === 'number' ? data.displayOrder : 0;
-    const status = data.status === 'PUBLISHED' ? 'PUBLISHED' : 'DRAFT';
+    // Lifecycle Rule: Ordinary create ALWAYS produces DRAFT. Explicit publish endpoint is required for publication.
+    const status: 'DRAFT' = 'DRAFT';
     const isActive = data.isActive !== undefined ? Boolean(data.isActive) : true;
 
     const [newBlock] = await db.insert(cmsContentBlocks).values({
@@ -380,7 +379,7 @@ export class CMSService {
       action: 'CREATE_BLOCK',
       targetType: 'CONTENT_BLOCK',
       targetId: newBlock.id.toString(),
-      details: `Created content block [${newBlock.sectionKey}] "${newBlock.title}"`,
+      details: `Created content block [${newBlock.sectionKey}] "${newBlock.title}" [DRAFT]`,
       metadata: { blockId: newBlock.id, sectionKey: newBlock.sectionKey, status: newBlock.status }
     });
 
@@ -417,10 +416,7 @@ export class CMSService {
     if (data.ctaLabel !== undefined) updateFields.ctaLabel = data.ctaLabel ? sanitizeText(data.ctaLabel, 50) : null;
     if (data.ctaUrl !== undefined) updateFields.ctaUrl = data.ctaUrl ? sanitizeSafeUrl(data.ctaUrl) : null;
     if (data.displayOrder !== undefined) updateFields.displayOrder = Number(data.displayOrder) || 0;
-    if (data.status !== undefined) {
-      if (!['DRAFT', 'PUBLISHED'].includes(data.status)) throw new Error('Invalid status.');
-      updateFields.status = data.status;
-    }
+    // Lifecycle Rule: Ordinary update NEVER alters publication status. Status transitions require explicit setBlockPublishStatus.
     if (data.isActive !== undefined) updateFields.isActive = Boolean(data.isActive);
 
     const [updated] = await db.update(cmsContentBlocks).set(updateFields).where(eq(cmsContentBlocks.id, id)).returning();

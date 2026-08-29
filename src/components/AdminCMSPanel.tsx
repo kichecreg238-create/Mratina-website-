@@ -139,7 +139,7 @@ export const AdminCMSPanel: React.FC = () => {
     tagline: 'Sacred Kenyan Craft & Terroir',
     hero_badge: 'Featured Release',
     accent_theme: 'gold',
-    concierge_delivery_note: 'Available in Nairobi & Environs within 90 mins',
+    concierge_delivery_note: 'Serving Kakamega town and nearby serviceable areas.',
     heritage_year: 'Since 2021',
     announcement_banner_active: 'false',
     announcement_banner_text: 'Complimentary sommelier gift packaging on orders above KES 5,000',
@@ -831,7 +831,7 @@ export const AdminCMSPanel: React.FC = () => {
                   maxLength={250}
                   className="w-full bg-[#111] border border-white/10 px-3 py-2 text-sm text-white focus:border-[#c5a059] outline-none"
                 />
-                <span className="text-[9px] text-white/30 font-mono mt-1 block">Default: Available in Nairobi & Environs within 90 mins</span>
+                <span className="text-[9px] text-white/30 font-mono mt-1 block">Default: Serving Kakamega town and nearby serviceable areas.</span>
               </div>
             </div>
           </div>
@@ -1111,15 +1111,21 @@ export const AdminCMSPanel: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-white/60 mb-2">Status</label>
-                  <select
-                    value={blockForm.status}
-                    onChange={e => setBlockForm({ ...blockForm, status: e.target.value as any })}
-                    className="w-full bg-[#181818] border border-white/10 px-3 py-2 text-xs text-white focus:border-[#c5a059] outline-none"
-                  >
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PUBLISHED">PUBLISHED</option>
-                  </select>
+                  <label className="block text-[10px] uppercase tracking-wider text-white/60 mb-2">Publication Status</label>
+                  <div className="py-1">
+                    <span
+                      className={`inline-block px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider font-bold rounded-sm border ${
+                        blockForm.status === 'PUBLISHED'
+                          ? 'bg-[#00ff88]/10 border-[#00ff88]/30 text-[#00ff88]'
+                          : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      }`}
+                    >
+                      {editingBlock ? blockForm.status : 'DRAFT'}
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-white/30 font-mono mt-1 block">
+                    {editingBlock ? 'Controlled via Publish/Unpublish button' : 'Created as Draft by default'}
+                  </span>
                 </div>
                 <div className="flex items-center pt-6">
                   <label className="flex items-center gap-2 text-xs text-white cursor-pointer">
@@ -1239,15 +1245,21 @@ export const AdminCMSPanel: React.FC = () => {
                   />
                 </div>
                 <div>
-                  <label className="block text-[10px] uppercase tracking-wider text-white/60 mb-2">Status</label>
-                  <select
-                    value={bannerForm.status}
-                    onChange={e => setBannerForm({ ...bannerForm, status: e.target.value as any })}
-                    className="w-full bg-[#181818] border border-white/10 px-3 py-2 text-xs text-white focus:border-[#c5a059] outline-none"
-                  >
-                    <option value="DRAFT">DRAFT</option>
-                    <option value="PUBLISHED">PUBLISHED</option>
-                  </select>
+                  <label className="block text-[10px] uppercase tracking-wider text-white/60 mb-2">Publication Status</label>
+                  <div className="py-1">
+                    <span
+                      className={`inline-block px-2.5 py-1 text-[10px] font-mono uppercase tracking-wider font-bold rounded-sm border ${
+                        bannerForm.status === 'PUBLISHED'
+                          ? 'bg-[#00ff88]/10 border-[#00ff88]/30 text-[#00ff88]'
+                          : 'bg-amber-500/10 border-amber-500/30 text-amber-400'
+                      }`}
+                    >
+                      {editingBanner ? bannerForm.status : 'DRAFT'}
+                    </span>
+                  </div>
+                  <span className="text-[9px] text-white/30 font-mono mt-1 block">
+                    {editingBanner ? 'Controlled via Publish/Unpublish button' : 'Created as Draft by default'}
+                  </span>
                 </div>
                 <div className="flex items-center pt-6">
                   <label className="flex items-center gap-2 text-xs text-white cursor-pointer">

@@ -72,7 +72,7 @@ export const Home = () => {
   const promoBlock = blocks.PROMO_FEATURE;
 
   const heroBadge = settings.hero_badge || 'Featured Release';
-  const conciergeDeliveryNote = conciergeBlock?.body || settings.concierge_delivery_note || 'Available in Nairobi & Environs within 90 mins';
+  const conciergeDeliveryNote = conciergeBlock?.body || settings.concierge_delivery_note || 'Serving Kakamega town and nearby serviceable areas.';
   const heritageYear = heritageBlock?.title || settings.heritage_year || 'Since 2021';
 
   return (

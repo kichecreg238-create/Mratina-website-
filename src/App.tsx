@@ -34,7 +34,7 @@ export default function App() {
 
           <div className="mt-auto pt-8 border-t border-white/5 hidden md:block">
             <p className="text-[10px] text-white/30 uppercase tracking-widest">Location</p>
-            <p className="text-xs text-white/70 mt-1">Nairobi, KE</p>
+            <p className="text-xs text-white/70 mt-1">Kakamega, KE</p>
           </div>
         </aside>
 
