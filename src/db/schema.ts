@@ -102,9 +102,30 @@ export const reviews = pgTable('reviews', {
   id: serial('id').primaryKey(),
   userId: integer('user_id').notNull().references(() => users.id),
   productId: integer('product_id').notNull().references(() => products.id),
+  orderId: integer('order_id').references(() => orders.id),
   rating: integer('rating').notNull(), // 1-5
   comment: text('comment'),
+  reviewerName: text('reviewer_name'),
+  status: text('status').notNull().default('PENDING'), // PENDING, APPROVED, REJECTED
   isApproved: boolean('is_approved').default(false).notNull(),
+  rejectionReason: text('rejection_reason'),
+  moderatedBy: integer('moderated_by').references(() => users.id),
+  moderatedAt: timestamp('moderated_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Review Audit Logs (Auditability for review submissions & moderation actions)
+export const reviewAuditLogs = pgTable('review_audit_logs', {
+  id: serial('id').primaryKey(),
+  reviewId: integer('review_id').notNull().references(() => reviews.id, { onDelete: 'cascade' }),
+  actorId: integer('actor_id').references(() => users.id),
+  actorRole: text('actor_role').notNull().default('ADMIN'), // 'CUSTOMER', 'ADMIN', 'SYSTEM'
+  action: text('action').notNull(), // 'SUBMITTED', 'UPDATED', 'APPROVED', 'REJECTED', 'DELETED'
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  reason: text('reason'),
+  metadata: jsonb('metadata'),
   createdAt: timestamp('created_at').defaultNow(),
 });
 

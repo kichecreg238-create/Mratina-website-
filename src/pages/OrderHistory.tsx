@@ -1,13 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore.ts';
 import { Navigate } from 'react-router-dom';
-import { Package, Clock, CheckCircle, Truck, XCircle, AlertCircle, Eye, X, ChevronRight } from 'lucide-react';
+import { Package, Clock, CheckCircle, Truck, XCircle, AlertCircle, Eye, X, ChevronRight, Star } from 'lucide-react';
+import { ProductModal } from '../components/ProductModal.tsx';
 
 export const OrderHistory = () => {
   const { user, dbUser, loading } = useAuthStore();
   const [orders, setOrders] = useState<any[]>([]);
   const [fetching, setFetching] = useState(true);
   const [selectedOrder, setSelectedOrder] = useState<any | null>(null);
+  const [reviewingProduct, setReviewingProduct] = useState<any | null>(null);
   const [showCancelModal, setShowCancelModal] = useState(false);
   const [cancellingOrder, setCancellingOrder] = useState<any | null>(null);
   const [cancelReason, setCancelReason] = useState('');
@@ -177,14 +179,25 @@ export const OrderHistory = () => {
                 {order.items && order.items.length > 0 && (
                   <div className="mb-6 space-y-2">
                     {order.items.map((item: any, idx: number) => (
-                      <div key={idx} className="flex justify-between items-center text-xs bg-black/30 p-2 border border-white/5">
+                      <div key={idx} className="flex justify-between items-center text-xs bg-black/30 p-2.5 border border-white/5">
                         <div className="flex flex-col">
                           <span className="text-white/90 font-medium">{item.product?.name}</span>
                           <span className="text-[10px] text-white/40 uppercase tracking-widest">{item.variant?.volume} • {item.variant?.packaging}</span>
                         </div>
-                        <div className="text-right">
-                          <span className="text-[#c5a059]">{item.quantity}x</span>
-                          <span className="text-white/40 text-[10px] ml-2">@ KES {Number(item.priceAtPurchase).toLocaleString()}</span>
+                        <div className="flex items-center gap-3">
+                          <div className="text-right">
+                            <span className="text-[#c5a059]">{item.quantity}x</span>
+                            <span className="text-white/40 text-[10px] ml-2">@ KES {Number(item.priceAtPurchase).toLocaleString()}</span>
+                          </div>
+                          {order.status === 'DELIVERED' && item.product && (
+                            <button
+                              onClick={() => setReviewingProduct(item.product)}
+                              className="px-2.5 py-1 bg-[#c5a059]/10 hover:bg-[#c5a059]/20 text-[#c5a059] border border-[#c5a059]/30 text-[10px] uppercase font-mono tracking-wider flex items-center gap-1 transition-colors"
+                            >
+                              <Star size={11} className="fill-current" />
+                              Review Reserve
+                            </button>
+                          )}
                         </div>
                       </div>
                     ))}
@@ -370,6 +383,17 @@ export const OrderHistory = () => {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Review Modal */}
+      {reviewingProduct && (
+        <ProductModal
+          product={reviewingProduct}
+          onClose={() => {
+            setReviewingProduct(null);
+            fetchOrders();
+          }}
+        />
       )}
     </div>
   );

@@ -10,6 +10,7 @@ import { eq, desc, inArray, and, or, ilike, sql } from "drizzle-orm";
 import { paymentService, isValidProvider } from "./src/services/payment.ts";
 import { orderOperationsService, OrderStatus } from "./src/services/orderOperations.ts";
 import { cmsService } from "./src/services/cmsService.ts";
+import { reviewService } from "./src/services/reviewService.ts";
 
 async function startServer() {
   const app = express();
@@ -1804,50 +1805,146 @@ async function startServer() {
      }
   });
 
-  // --- PUBLIC REVIEWS API ---
+  // --- REVIEWS & RATINGS API (MODULE 18) ---
+  
+  // Public reviews & aggregate statistics
   app.get("/api/products/:id/reviews", async (req, res) => {
     try {
       const productId = parseInt(req.params.id);
-      
-      const productReviews = await db.select({
-        id: reviews.id,
-        rating: reviews.rating,
-        comment: reviews.comment,
-        createdAt: reviews.createdAt,
-        user: { email: users.email }
-      })
-      .from(reviews)
-      .leftJoin(users, eq(reviews.userId, users.id))
-      .where(eq(reviews.productId, productId))
-      .orderBy(desc(reviews.createdAt));
-      
-      res.json({ reviews: productReviews });
-    } catch (error) {
+      if (isNaN(productId)) {
+        return res.status(400).json({ error: "Invalid product ID" });
+      }
+      const data = await reviewService.getPublicProductReviews(productId);
+      res.json(data);
+    } catch (error: any) {
+      console.error("Failed to fetch public reviews:", error);
       res.status(500).json({ error: "Failed to fetch reviews" });
     }
   });
 
+  // Customer review eligibility verification
+  app.get("/api/products/:id/reviews/eligibility", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      if (isNaN(productId)) {
+        return res.status(400).json({ error: "Invalid product ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      const eligibility = await reviewService.checkEligibility(user.id, productId);
+      res.json(eligibility);
+    } catch (error: any) {
+      console.error("Failed to check review eligibility:", error);
+      res.status(500).json({ error: error.message || "Failed to check eligibility" });
+    }
+  });
+
+  // Customer review submission / update
   app.post("/api/products/:id/reviews", requireAuth, async (req: AuthRequest, res) => {
     try {
       const productId = parseInt(req.params.id);
-      const { rating, comment } = req.body;
+      if (isNaN(productId)) {
+        return res.status(400).json({ error: "Invalid product ID" });
+      }
       const user = await getUserByUid(req.user!.uid);
-      
-      if (!rating || rating < 1 || rating > 5) {
-        return res.status(400).json({ error: "Valid rating (1-5) is required" });
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+      if (user.role === 'DELIVERER') {
+        return res.status(403).json({ error: "Deliverers cannot submit product reviews on behalf of customers." });
       }
 
-      await db.insert(reviews).values({
+      const { rating, comment, reviewerName, orderId } = req.body;
+      const result = await reviewService.submitReview(user.id, user.email, {
         productId,
-        userId: user.id,
-        rating,
+        rating: Number(rating),
         comment,
-        isApproved: true, // Auto-approve for now
+        reviewerName,
+        orderId: orderId ? parseInt(orderId) : undefined,
       });
-      
-      res.json({ success: true });
-    } catch (error) {
-      res.status(500).json({ error: "Failed to submit review" });
+
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Failed to submit review:", error);
+      res.status(400).json({ error: error.message || "Failed to submit review" });
+    }
+  });
+
+  // --- ADMIN REVIEWS MODERATION API (ADMIN ONLY) ---
+
+  // List all reviews with filters
+  app.get("/api/admin/reviews", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const productId = req.query.productId ? parseInt(req.query.productId as string) : undefined;
+      const search = req.query.search as string | undefined;
+
+      const data = await reviewService.getAdminReviews({ status, productId, search });
+      res.json(data);
+    } catch (error: any) {
+      console.error("Failed to fetch admin reviews:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch reviews" });
+    }
+  });
+
+  // Moderate review (APPROVE, REJECT, HIDE)
+  app.post("/api/admin/reviews/:id/moderate", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const reviewId = parseInt(req.params.id);
+      if (isNaN(reviewId)) {
+        return res.status(400).json({ error: "Invalid review ID" });
+      }
+      const { action, reason } = req.body;
+      const user = await getUserByUid(req.user!.uid);
+
+      const updated = await reviewService.moderateReview(
+        reviewId,
+        { id: user.id, email: user.email, role: user.role },
+        action,
+        reason
+      );
+
+      res.json({ success: true, review: updated });
+    } catch (error: any) {
+      console.error("Failed to moderate review:", error);
+      res.status(400).json({ error: error.message || "Failed to moderate review" });
+    }
+  });
+
+  // Delete review
+  app.delete("/api/admin/reviews/:id", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const reviewId = parseInt(req.params.id);
+      if (isNaN(reviewId)) {
+        return res.status(400).json({ error: "Invalid review ID" });
+      }
+      const { reason } = req.body;
+      const user = await getUserByUid(req.user!.uid);
+
+      const result = await reviewService.deleteReview(
+        reviewId,
+        { id: user.id, email: user.email, role: user.role },
+        reason
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to delete review:", error);
+      res.status(400).json({ error: error.message || "Failed to delete review" });
+    }
+  });
+
+  // Get review audit logs
+  app.get("/api/admin/reviews/audit-logs", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const reviewId = req.query.reviewId ? parseInt(req.query.reviewId as string) : undefined;
+      const logs = await reviewService.getReviewAuditLogs(reviewId);
+      res.json({ auditLogs: logs });
+    } catch (error: any) {
+      console.error("Failed to fetch review audit logs:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch review audit logs" });
     }
   });
 

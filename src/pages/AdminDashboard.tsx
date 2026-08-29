@@ -29,10 +29,12 @@ import {
   Activity,
   FileText,
   Lock,
-  Sliders
+  Sliders,
+  Star
 } from 'lucide-react';
 
 import { AdminCMSPanel } from '../components/AdminCMSPanel.tsx';
+import { AdminReviewsPanel } from '../components/AdminReviewsPanel.tsx';
 
 export type AdminTab =
   | 'OVERVIEW'
@@ -44,6 +46,7 @@ export type AdminTab =
   | 'PAYMENTS'
   | 'STAFF'
   | 'CMS'
+  | 'REVIEWS'
   | 'AUDIT';
 
 export const AdminDashboard = () => {
@@ -678,6 +681,7 @@ export const AdminDashboard = () => {
           { id: 'PAYMENTS', label: 'Payments', icon: CreditCard, count: paymentsList.length },
           { id: 'STAFF', label: 'Staff / Deliverers', icon: Users, count: deliverers.length },
           { id: 'CMS', label: 'CMS & Visuals', icon: Sliders },
+          { id: 'REVIEWS', label: 'Reviews', icon: Star },
           { id: 'AUDIT', label: 'Audit Ledger', icon: FileText, count: auditLogsList.length }
         ].map(tab => {
           const Icon = tab.icon;
@@ -1697,6 +1701,11 @@ export const AdminDashboard = () => {
             </div>
             <AdminCMSPanel />
           </div>
+        )}
+
+        {/* 11. REVIEWS & RATINGS MODERATION TAB (MODULE 18) */}
+        {activeTab === 'REVIEWS' && (
+          <AdminReviewsPanel />
         )}
       </main>
 
