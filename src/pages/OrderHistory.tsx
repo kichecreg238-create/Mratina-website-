@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from 'react';
 import { useAuthStore } from '../store/useAuthStore.ts';
 import { Navigate } from 'react-router-dom';
-import { Package, Clock, CheckCircle, Truck, XCircle, AlertCircle, Eye, X, ChevronRight, Star } from 'lucide-react';
+import { Package, Clock, CheckCircle, Truck, XCircle, AlertCircle, Eye, X, ChevronRight, Star, RotateCcw, LifeBuoy } from 'lucide-react';
 import { ProductModal } from '../components/ProductModal.tsx';
+import { CustomerRefundModal } from '../components/CustomerRefundModal.tsx';
+import { CustomerSupportModal } from '../components/CustomerSupportModal.tsx';
 
 export const OrderHistory = () => {
   const { user, dbUser, loading } = useAuthStore();
@@ -15,6 +17,11 @@ export const OrderHistory = () => {
   const [cancelReason, setCancelReason] = useState('');
   const [isSubmittingCancel, setIsSubmittingCancel] = useState(false);
   const [cancelError, setCancelError] = useState<string | null>(null);
+
+  // Module 19: Refund & Support Modals State
+  const [refundingOrder, setRefundingOrder] = useState<any | null>(null);
+  const [supportModalOpen, setSupportModalOpen] = useState(false);
+  const [supportOrderId, setSupportOrderId] = useState<number | undefined>(undefined);
 
   const fetchOrders = () => {
     if (!user) {
@@ -140,8 +147,19 @@ export const OrderHistory = () => {
           <h2 className="text-sm uppercase tracking-[0.4em] text-[#c5a059] mb-1">Vault Access</h2>
           <p className="text-xs text-white/50">Order History & Operations Tracking</p>
         </div>
-        <div className="text-xs text-white/40 font-mono">
-          {orders.length} {orders.length === 1 ? 'Record' : 'Records'}
+        <div className="flex items-center gap-3">
+          <button
+            onClick={() => {
+              setSupportOrderId(undefined);
+              setSupportModalOpen(true);
+            }}
+            className="px-3.5 py-1.5 bg-[#c5a059]/10 hover:bg-[#c5a059]/20 text-[#c5a059] border border-[#c5a059]/40 text-xs font-mono uppercase tracking-wider flex items-center gap-1.5 transition-colors"
+          >
+            <LifeBuoy size={14} /> Support Desk
+          </button>
+          <div className="text-xs text-white/40 font-mono hidden sm:block">
+            {orders.length} {orders.length === 1 ? 'Record' : 'Records'}
+          </div>
         </div>
       </div>
       
@@ -212,7 +230,34 @@ export const OrderHistory = () => {
                     )}
                   </div>
                   
-                  <div className="flex items-center gap-3">
+                  <div className="flex flex-wrap items-center gap-2.5">
+                    {/* Support Button */}
+                    <button
+                      onClick={() => {
+                        setSupportOrderId(order.id);
+                        setSupportModalOpen(true);
+                      }}
+                      className="text-xs uppercase font-mono tracking-wider px-2.5 py-1.5 border border-white/10 text-white/70 hover:text-white hover:bg-white/5 transition-colors flex items-center gap-1"
+                    >
+                      <LifeBuoy size={12} /> Support
+                    </button>
+
+                    {/* Request Refund Button (if eligible) */}
+                    {order.paymentState === 'SUCCESS' && ['DELIVERED', 'CANCELLED'].includes(order.status) && (
+                      <button
+                        onClick={() => setRefundingOrder(order)}
+                        className="text-xs uppercase font-mono tracking-wider px-2.5 py-1.5 border border-amber-500/30 text-amber-300 hover:bg-amber-500/10 transition-colors flex items-center gap-1"
+                      >
+                        <RotateCcw size={12} /> Request Refund
+                      </button>
+                    )}
+
+                    {order.paymentState === 'REFUNDED' && (
+                      <span className="text-[10px] uppercase font-mono tracking-wider px-2 py-1 bg-emerald-950/40 text-emerald-400 border border-emerald-500/30">
+                        Refund Settled
+                      </span>
+                    )}
+
                     {canCancel && (
                       <button
                         onClick={() => {
@@ -238,6 +283,28 @@ export const OrderHistory = () => {
             );
           })}
         </div>
+      )}
+
+      {/* Customer Refund Modal (Module 19) */}
+      {refundingOrder && (
+        <CustomerRefundModal
+          order={refundingOrder}
+          onClose={() => setRefundingOrder(null)}
+          onSuccess={() => {
+            fetchOrders();
+          }}
+        />
+      )}
+
+      {/* Customer Support Modal (Module 19) */}
+      {supportModalOpen && (
+        <CustomerSupportModal
+          initialOrderId={supportOrderId}
+          onClose={() => {
+            setSupportModalOpen(false);
+            setSupportOrderId(undefined);
+          }}
+        />
       )}
 
       {/* Deep Order Details & Timeline Modal */}
@@ -299,6 +366,36 @@ export const OrderHistory = () => {
               <div className="mt-3 pt-3 border-t border-white/5 flex justify-between text-xs font-serif">
                 <span className="text-white/60">Grand Total (incl. Delivery)</span>
                 <span className="text-[#c5a059] text-sm">KES {Number(selectedOrder.totalAmount).toLocaleString()}</span>
+              </div>
+            </div>
+
+            {/* Quick Actions Bar */}
+            <div className="p-3 bg-black/40 border border-white/5 mb-6 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[10px] uppercase font-mono text-white/50">Concierge Services</span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const orderId = selectedOrder.id;
+                    setSelectedOrder(null);
+                    setSupportOrderId(orderId);
+                    setSupportModalOpen(true);
+                  }}
+                  className="px-3 py-1 bg-white/5 hover:bg-white/10 text-white/80 text-xs font-mono uppercase border border-white/10 flex items-center gap-1"
+                >
+                  <LifeBuoy size={12} /> Contact Support
+                </button>
+                {selectedOrder.paymentState === 'SUCCESS' && ['DELIVERED', 'CANCELLED'].includes(selectedOrder.status) && (
+                  <button
+                    onClick={() => {
+                      const order = selectedOrder;
+                      setSelectedOrder(null);
+                      setRefundingOrder(order);
+                    }}
+                    className="px-3 py-1 bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 text-xs font-mono uppercase border border-amber-500/30 flex items-center gap-1"
+                  >
+                    <RotateCcw size={12} /> Request Refund
+                  </button>
+                )}
               </div>
             </div>
 

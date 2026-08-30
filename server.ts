@@ -11,6 +11,8 @@ import { paymentService, isValidProvider } from "./src/services/payment.ts";
 import { orderOperationsService, OrderStatus } from "./src/services/orderOperations.ts";
 import { cmsService } from "./src/services/cmsService.ts";
 import { reviewService } from "./src/services/reviewService.ts";
+import { refundService } from "./src/services/refundService.ts";
+import { supportService } from "./src/services/supportService.ts";
 
 async function startServer() {
   const app = express();
@@ -1945,6 +1947,355 @@ async function startServer() {
     } catch (error: any) {
       console.error("Failed to fetch review audit logs:", error);
       res.status(500).json({ error: error.message || "Failed to fetch review audit logs" });
+    }
+  });
+
+  // ==========================================
+  // MODULE 19: REFUNDS & SUPPORT API ENDPOINTS
+  // ==========================================
+
+  // --- CUSTOMER REFUND APIS ---
+
+  // Check refund eligibility for an order
+  app.get("/api/orders/:id/refund-eligibility", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) {
+        return res.status(400).json({ error: "Invalid order ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const result = await refundService.checkRefundEligibility(user.id, orderId);
+      res.json(result);
+    } catch (error: any) {
+      console.error("Failed to check refund eligibility:", error);
+      res.status(500).json({ error: error.message || "Failed to check refund eligibility" });
+    }
+  });
+
+  // Submit refund request for an authorized order
+  app.post("/api/orders/:id/refund-request", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const orderId = parseInt(req.params.id);
+      if (isNaN(orderId)) {
+        return res.status(400).json({ error: "Invalid order ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const { reason, amount } = req.body;
+      const refund = await refundService.requestRefund(user.id, user.email, {
+        orderId,
+        reason,
+        amount: amount ? Number(amount) : undefined,
+      });
+
+      res.json({ success: true, refund });
+    } catch (error: any) {
+      console.error("Failed to submit refund request:", error);
+      res.status(400).json({ error: error.message || "Failed to submit refund request" });
+    }
+  });
+
+  // Get current user's refund requests
+  app.get("/api/refunds/me", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const refunds = await refundService.getUserRefunds(user.id);
+      res.json({ refunds });
+    } catch (error: any) {
+      console.error("Failed to fetch user refunds:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch refunds" });
+    }
+  });
+
+  // Get refund details with audit trail
+  app.get("/api/refunds/:id", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const refundId = parseInt(req.params.id);
+      if (isNaN(refundId)) {
+        return res.status(400).json({ error: "Invalid refund ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const refund = await refundService.getRefundById(refundId, { id: user.id, role: user.role });
+      if (!refund) {
+        return res.status(404).json({ error: "Refund request not found" });
+      }
+
+      res.json({ refund });
+    } catch (error: any) {
+      console.error("Failed to fetch refund details:", error);
+      res.status(403).json({ error: error.message || "Access denied" });
+    }
+  });
+
+  // --- ADMIN REFUND APIS (ADMIN ONLY) ---
+
+  // List all refund requests with filter & stats
+  app.get("/api/admin/refunds", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const orderId = req.query.orderId ? parseInt(req.query.orderId as string) : undefined;
+      const search = req.query.search as string | undefined;
+
+      const data = await refundService.getAdminRefunds({ status, orderId, search });
+      res.json(data);
+    } catch (error: any) {
+      console.error("Failed to fetch admin refunds:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch refunds" });
+    }
+  });
+
+  // Review refund request (APPROVE or REJECT)
+  app.post("/api/admin/refunds/:id/review", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const refundId = parseInt(req.params.id);
+      if (isNaN(refundId)) {
+        return res.status(400).json({ error: "Invalid refund ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      const { action, reason, adminNotes } = req.body;
+
+      const result = await refundService.reviewRefund(
+        refundId,
+        { id: user.id, role: user.role, email: user.email },
+        { action, reason, adminNotes }
+      );
+
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Failed to review refund:", error);
+      res.status(400).json({ error: error.message || "Failed to review refund" });
+    }
+  });
+
+  // Get refund audit logs
+  app.get("/api/admin/refunds/audit-logs", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const refundId = req.query.refundId ? parseInt(req.query.refundId as string) : undefined;
+      const logs = await refundService.getRefundAuditLogs(refundId);
+      res.json({ auditLogs: logs });
+    } catch (error: any) {
+      console.error("Failed to fetch refund audit logs:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch refund audit logs" });
+    }
+  });
+
+  // --- CUSTOMER SUPPORT APIS ---
+
+  // Create support ticket
+  app.post("/api/support/tickets", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const { orderId, category, subject, message, priority } = req.body;
+      const result = await supportService.createTicket(user.id, user.email, {
+        orderId: orderId ? parseInt(orderId) : null,
+        category,
+        subject,
+        message,
+        priority,
+      });
+
+      res.json({ success: true, ...result });
+    } catch (error: any) {
+      console.error("Failed to create support ticket:", error);
+      res.status(400).json({ error: error.message || "Failed to create support ticket" });
+    }
+  });
+
+  // Get customer tickets
+  app.get("/api/support/tickets/me", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const tickets = await supportService.getUserTickets(user.id);
+      res.json({ tickets });
+    } catch (error: any) {
+      console.error("Failed to fetch customer tickets:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch tickets" });
+    }
+  });
+
+  // Get ticket details & conversation thread
+  app.get("/api/support/tickets/:id", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      if (isNaN(ticketId)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const ticket = await supportService.getTicketDetails(ticketId, { id: user.id, role: user.role });
+      if (!ticket) {
+        return res.status(404).json({ error: "Ticket not found" });
+      }
+
+      res.json({ ticket });
+    } catch (error: any) {
+      console.error("Failed to fetch ticket details:", error);
+      res.status(403).json({ error: error.message || "Access denied" });
+    }
+  });
+
+  // Customer replies to ticket
+  app.post("/api/support/tickets/:id/messages", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      if (isNaN(ticketId)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) {
+        return res.status(401).json({ error: "User not found" });
+      }
+
+      const { message } = req.body;
+      const newMsg = await supportService.addMessage(
+        ticketId,
+        { id: user.id, role: user.role, email: user.email },
+        message,
+        false
+      );
+
+      res.json({ success: true, message: newMsg });
+    } catch (error: any) {
+      console.error("Failed to post message to ticket:", error);
+      res.status(400).json({ error: error.message || "Failed to post message" });
+    }
+  });
+
+  // --- ADMIN SUPPORT APIS (ADMIN ONLY) ---
+
+  // List all tickets with filters
+  app.get("/api/admin/support/tickets", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const status = req.query.status as string | undefined;
+      const category = req.query.category as string | undefined;
+      const priority = req.query.priority as string | undefined;
+      const search = req.query.search as string | undefined;
+
+      const data = await supportService.getAdminTickets({ status, category, priority, search });
+      res.json(data);
+    } catch (error: any) {
+      console.error("Failed to fetch admin tickets:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch tickets" });
+    }
+  });
+
+  // Admin posts response or internal note
+  app.post("/api/admin/support/tickets/:id/messages", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      if (isNaN(ticketId)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      const { message, isInternalNote } = req.body;
+
+      const newMsg = await supportService.addMessage(
+        ticketId,
+        { id: user.id, role: user.role, email: user.email },
+        message,
+        Boolean(isInternalNote)
+      );
+
+      res.json({ success: true, message: newMsg });
+    } catch (error: any) {
+      console.error("Failed to post admin response:", error);
+      res.status(400).json({ error: error.message || "Failed to post response" });
+    }
+  });
+
+  // Admin updates ticket status
+  app.patch("/api/admin/support/tickets/:id/status", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      if (isNaN(ticketId)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      const { status, reason } = req.body;
+
+      const updated = await supportService.updateTicketStatus(
+        ticketId,
+        { id: user.id, role: user.role, email: user.email },
+        status,
+        reason
+      );
+
+      res.json({ success: true, ticket: updated });
+    } catch (error: any) {
+      console.error("Failed to update ticket status:", error);
+      res.status(400).json({ error: error.message || "Failed to update status" });
+    }
+  });
+
+  // Admin assigns ticket to staff
+  app.patch("/api/admin/support/tickets/:id/assign", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      if (isNaN(ticketId)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      const { assignedTo } = req.body;
+
+      const updated = await supportService.assignTicket(
+        ticketId,
+        { id: user.id, role: user.role, email: user.email },
+        assignedTo ? parseInt(assignedTo) : null
+      );
+
+      res.json({ success: true, ticket: updated });
+    } catch (error: any) {
+      console.error("Failed to assign ticket:", error);
+      res.status(400).json({ error: error.message || "Failed to assign ticket" });
+    }
+  });
+
+  // Admin updates private internal notes
+  app.patch("/api/admin/support/tickets/:id/internal-notes", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const ticketId = parseInt(req.params.id);
+      if (isNaN(ticketId)) {
+        return res.status(400).json({ error: "Invalid ticket ID" });
+      }
+      const user = await getUserByUid(req.user!.uid);
+      const { internalNotes } = req.body;
+
+      const updated = await supportService.updateInternalNotes(
+        ticketId,
+        { id: user.id, role: user.role, email: user.email },
+        internalNotes
+      );
+
+      res.json({ success: true, ticket: updated });
+    } catch (error: any) {
+      console.error("Failed to update internal notes:", error);
+      res.status(400).json({ error: error.message || "Failed to update internal notes" });
     }
   });
 

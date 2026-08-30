@@ -30,11 +30,15 @@ import {
   FileText,
   Lock,
   Sliders,
-  Star
+  Star,
+  RotateCcw,
+  LifeBuoy
 } from 'lucide-react';
 
 import { AdminCMSPanel } from '../components/AdminCMSPanel.tsx';
 import { AdminReviewsPanel } from '../components/AdminReviewsPanel.tsx';
+import { AdminRefundsPanel } from '../components/AdminRefundsPanel.tsx';
+import { AdminSupportPanel } from '../components/AdminSupportPanel.tsx';
 
 export type AdminTab =
   | 'OVERVIEW'
@@ -44,6 +48,8 @@ export type AdminTab =
   | 'INVENTORY'
   | 'DELIVERY'
   | 'PAYMENTS'
+  | 'REFUNDS'
+  | 'SUPPORT'
   | 'STAFF'
   | 'CMS'
   | 'REVIEWS'
@@ -679,6 +685,8 @@ export const AdminDashboard = () => {
           { id: 'INVENTORY', label: 'Inventory', icon: Layers, badge: overview?.metrics?.lowStockCount ? `${overview.metrics.lowStockCount} Low` : null },
           { id: 'DELIVERY', label: 'Delivery', icon: Truck, count: overview?.metrics?.activeDeliveries },
           { id: 'PAYMENTS', label: 'Payments', icon: CreditCard, count: paymentsList.length },
+          { id: 'REFUNDS', label: 'Refunds', icon: RotateCcw },
+          { id: 'SUPPORT', label: 'Support / Tickets', icon: LifeBuoy },
           { id: 'STAFF', label: 'Staff / Deliverers', icon: Users, count: deliverers.length },
           { id: 'CMS', label: 'CMS & Visuals', icon: Sliders },
           { id: 'REVIEWS', label: 'Reviews', icon: Star },
@@ -1502,6 +1510,52 @@ export const AdminDashboard = () => {
                 </tbody>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* REFUNDS TAB (MODULE 19) */}
+        {activeTab === 'REFUNDS' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <h2 className="text-base font-serif text-white uppercase tracking-wider flex items-center gap-2">
+                  <RotateCcw className="w-4 h-4 text-[#c5a059]" />
+                  Refund Governance & Settlement
+                </h2>
+                <p className="text-xs text-white/50 mt-1">
+                  Authoritative review and execution of payment refunds across M-Pesa and Airtel Money with immutable audit trails.
+                </p>
+              </div>
+            </div>
+            <AdminRefundsPanel
+              onOpenOrderOperations={(id) => {
+                setActiveTab('ORDERS');
+                openOrderOperations(id);
+              }}
+            />
+          </div>
+        )}
+
+        {/* SUPPORT TICKETS TAB (MODULE 19) */}
+        {activeTab === 'SUPPORT' && (
+          <div className="space-y-6">
+            <div className="flex items-center justify-between border-b border-white/10 pb-4">
+              <div>
+                <h2 className="text-base font-serif text-white uppercase tracking-wider flex items-center gap-2">
+                  <LifeBuoy className="w-4 h-4 text-[#c5a059]" />
+                  Customer Support & Inquiry Desk
+                </h2>
+                <p className="text-xs text-white/50 mt-1">
+                  Manage customer inquiries, assign staff, reply in real time, and maintain confidential internal notes.
+                </p>
+              </div>
+            </div>
+            <AdminSupportPanel
+              onOpenOrderOperations={(id) => {
+                setActiveTab('ORDERS');
+                openOrderOperations(id);
+              }}
+            />
           </div>
         )}
 

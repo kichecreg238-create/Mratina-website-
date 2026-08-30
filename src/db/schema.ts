@@ -207,9 +207,85 @@ export const orderAuditLogs = pgTable('order_audit_logs', {
   createdAt: timestamp('created_at').defaultNow(),
 });
 
+// Refund Requests (Module 19 - Customer refund requests and Admin lifecycle management)
+export const refundRequests = pgTable('refund_requests', {
+  id: serial('id').primaryKey(),
+  orderId: integer('order_id').notNull().references(() => orders.id),
+  userId: integer('user_id').notNull().references(() => users.id),
+  amount: decimal('amount', { precision: 10, scale: 2 }).notNull(),
+  reason: text('reason').notNull(),
+  status: text('status').notNull().default('REQUESTED'), // 'REQUESTED', 'APPROVED', 'REJECTED', 'PROCESSING', 'COMPLETED', 'FAILED'
+  provider: text('provider'), // 'M-PESA', 'AIRTEL_MONEY'
+  providerReference: text('provider_reference'),
+  rejectionReason: text('rejection_reason'),
+  adminNotes: text('admin_notes'),
+  processedBy: integer('processed_by').references(() => users.id),
+  processedAt: timestamp('processed_at'),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Refund Audit Logs (Lifecycle traceability and provider results)
+export const refundAuditLogs = pgTable('refund_audit_logs', {
+  id: serial('id').primaryKey(),
+  refundRequestId: integer('refund_request_id').notNull().references(() => refundRequests.id, { onDelete: 'cascade' }),
+  orderId: integer('order_id').notNull().references(() => orders.id),
+  actorId: integer('actor_id').references(() => users.id),
+  actorRole: text('actor_role').notNull().default('SYSTEM'), // 'CUSTOMER', 'ADMIN', 'SYSTEM'
+  action: text('action').notNull(), // 'REQUESTED', 'APPROVED', 'REJECTED', 'PROVIDER_INITIATED', 'COMPLETED', 'FAILED'
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  reason: text('reason'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Support Tickets (Module 19 - Order-linked & General Support Management)
+export const supportTickets = pgTable('support_tickets', {
+  id: serial('id').primaryKey(),
+  ticketNumber: text('ticket_number').notNull().unique(), // e.g. "TICK-1001"
+  userId: integer('user_id').notNull().references(() => users.id),
+  orderId: integer('order_id').references(() => orders.id),
+  category: text('category').notNull().default('ORDER_ISSUE'), // 'ORDER_ISSUE', 'DELIVERY_STATUS', 'QUALITY_ISSUE', 'PAYMENT_ISSUE', 'ACCOUNT_INQUIRY', 'OTHER'
+  subject: text('subject').notNull(),
+  status: text('status').notNull().default('OPEN'), // 'OPEN', 'IN_PROGRESS', 'RESOLVED', 'CLOSED'
+  priority: text('priority').notNull().default('MEDIUM'), // 'LOW', 'MEDIUM', 'HIGH', 'URGENT'
+  assignedTo: integer('assigned_to').references(() => users.id),
+  internalNotes: text('internal_notes'), // Staff/Admin only
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+  resolvedAt: timestamp('resolved_at'),
+});
+
+// Support Messages / Thread (Two-way communication with internal notes support)
+export const supportMessages = pgTable('support_messages', {
+  id: serial('id').primaryKey(),
+  ticketId: integer('ticket_id').notNull().references(() => supportTickets.id, { onDelete: 'cascade' }),
+  senderId: integer('sender_id').notNull().references(() => users.id),
+  senderRole: text('sender_role').notNull(), // 'CUSTOMER', 'ADMIN', 'DELIVERER'
+  message: text('message').notNull(),
+  isInternalNote: boolean('is_internal_note').default(false).notNull(), // When true, completely hidden from customer
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Support Audit Logs (Traceability of ticket lifecycle events)
+export const supportAuditLogs = pgTable('support_audit_logs', {
+  id: serial('id').primaryKey(),
+  ticketId: integer('ticket_id').notNull().references(() => supportTickets.id, { onDelete: 'cascade' }),
+  actorId: integer('actor_id').references(() => users.id),
+  actorRole: text('actor_role').notNull().default('SYSTEM'), // 'CUSTOMER', 'ADMIN', 'SYSTEM'
+  action: text('action').notNull(), // 'CREATED', 'ASSIGNED', 'STATUS_CHANGE', 'REPLIED', 'NOTE_ADDED', 'RESOLVED', 'CLOSED'
+  fromStatus: text('from_status'),
+  toStatus: text('to_status'),
+  details: text('details'),
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
 // Relations
 export const productsRelations = relations(products, ({ many }) => ({
   variants: many(variants),
+  reviews: many(reviews),
 }));
 
 export const variantsRelations = relations(variants, ({ one }) => ({
@@ -230,6 +306,78 @@ export const ordersRelations = relations(orders, ({ one, many }) => ({
     references: [deliveries.orderId]
   }),
   auditLogs: many(orderAuditLogs),
+  refundRequests: many(refundRequests),
+  supportTickets: many(supportTickets),
+}));
+
+export const refundRequestsRelations = relations(refundRequests, ({ one, many }) => ({
+  order: one(orders, {
+    fields: [refundRequests.orderId],
+    references: [orders.id],
+  }),
+  user: one(users, {
+    fields: [refundRequests.userId],
+    references: [users.id],
+  }),
+  processor: one(users, {
+    fields: [refundRequests.processedBy],
+    references: [users.id],
+  }),
+  auditLogs: many(refundAuditLogs),
+}));
+
+export const refundAuditLogsRelations = relations(refundAuditLogs, ({ one }) => ({
+  refundRequest: one(refundRequests, {
+    fields: [refundAuditLogs.refundRequestId],
+    references: [refundRequests.id],
+  }),
+  order: one(orders, {
+    fields: [refundAuditLogs.orderId],
+    references: [orders.id],
+  }),
+  actor: one(users, {
+    fields: [refundAuditLogs.actorId],
+    references: [users.id],
+  }),
+}));
+
+export const supportTicketsRelations = relations(supportTickets, ({ one, many }) => ({
+  user: one(users, {
+    fields: [supportTickets.userId],
+    references: [users.id],
+  }),
+  order: one(orders, {
+    fields: [supportTickets.orderId],
+    references: [orders.id],
+  }),
+  assignee: one(users, {
+    fields: [supportTickets.assignedTo],
+    references: [users.id],
+  }),
+  messages: many(supportMessages),
+  auditLogs: many(supportAuditLogs),
+}));
+
+export const supportMessagesRelations = relations(supportMessages, ({ one }) => ({
+  ticket: one(supportTickets, {
+    fields: [supportMessages.ticketId],
+    references: [supportTickets.id],
+  }),
+  sender: one(users, {
+    fields: [supportMessages.senderId],
+    references: [users.id],
+  }),
+}));
+
+export const supportAuditLogsRelations = relations(supportAuditLogs, ({ one }) => ({
+  ticket: one(supportTickets, {
+    fields: [supportAuditLogs.ticketId],
+    references: [supportTickets.id],
+  }),
+  actor: one(users, {
+    fields: [supportAuditLogs.actorId],
+    references: [users.id],
+  }),
 }));
 
 export const orderAuditLogsRelations = relations(orderAuditLogs, ({ one }) => ({
