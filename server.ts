@@ -13,6 +13,8 @@ import { cmsService } from "./src/services/cmsService.ts";
 import { reviewService } from "./src/services/reviewService.ts";
 import { refundService } from "./src/services/refundService.ts";
 import { supportService } from "./src/services/supportService.ts";
+import { notificationService } from "./src/services/notificationService.ts";
+import { analyticsService } from "./src/services/analyticsService.ts";
 
 async function startServer() {
   const app = express();
@@ -2364,6 +2366,152 @@ async function startServer() {
     } catch (error: any) {
       console.error("Failed to update internal notes:", error);
       res.status(400).json({ error: error.message || "Failed to update internal notes" });
+    }
+  });
+
+  // ==========================================
+  // MODULE 20: NOTIFICATIONS API ENDPOINTS
+  // ==========================================
+
+  // Customer: Get notifications for authenticated user
+  app.get("/api/notifications", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const { type, unreadOnly, limit, offset } = req.query;
+      const list = await notificationService.getUserNotifications(user.id, {
+        type: type as any,
+        unreadOnly: unreadOnly === 'true',
+        limit: limit ? parseInt(limit as string) : 50,
+        offset: offset ? parseInt(offset as string) : 0,
+      });
+
+      res.json({ success: true, notifications: list });
+    } catch (error: any) {
+      console.error("Failed to fetch notifications:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch notifications" });
+    }
+  });
+
+  // Customer: Get unread notification count
+  app.get("/api/notifications/unread-count", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const count = await notificationService.getUnreadCount(user.id);
+      res.json({ success: true, unreadCount: count });
+    } catch (error: any) {
+      console.error("Failed to fetch unread count:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch unread count" });
+    }
+  });
+
+  // Customer: Mark single notification as read
+  app.post("/api/notifications/:id/read", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const notificationId = parseInt(req.params.id);
+      if (isNaN(notificationId)) {
+        return res.status(400).json({ error: "Invalid notification ID" });
+      }
+
+      const updated = await notificationService.markAsRead(notificationId, user.id);
+      if (!updated) {
+        return res.status(404).json({ error: "Notification not found or access denied" });
+      }
+
+      res.json({ success: true, notification: updated });
+    } catch (error: any) {
+      console.error("Failed to mark notification as read:", error);
+      res.status(500).json({ error: error.message || "Failed to mark notification as read" });
+    }
+  });
+
+  // Customer: Mark all notifications as read
+  app.post("/api/notifications/read-all", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const count = await notificationService.markAllAsRead(user.id);
+      res.json({ success: true, count });
+    } catch (error: any) {
+      console.error("Failed to mark all as read:", error);
+      res.status(500).json({ error: error.message || "Failed to mark all notifications as read" });
+    }
+  });
+
+  // Customer: Get notification preferences
+  app.get("/api/notifications/preferences", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const prefs = await notificationService.getPreferences(user.id);
+      res.json({ success: true, preferences: prefs });
+    } catch (error: any) {
+      console.error("Failed to fetch notification preferences:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch notification preferences" });
+    }
+  });
+
+  // Customer: Update notification preferences
+  app.put("/api/notifications/preferences", requireAuth, async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(404).json({ error: "User not found" });
+
+      const { emailNotifications, smsNotifications, inAppNotifications, orderUpdates, promotionalUpdates, supportUpdates } = req.body;
+      const updated = await notificationService.updatePreferences(user.id, {
+        emailNotifications,
+        smsNotifications,
+        inAppNotifications,
+        orderUpdates,
+        promotionalUpdates,
+        supportUpdates,
+      });
+
+      res.json({ success: true, preferences: updated });
+    } catch (error: any) {
+      console.error("Failed to update notification preferences:", error);
+      res.status(400).json({ error: error.message || "Failed to update notification preferences" });
+    }
+  });
+
+  // Admin: Get admin alert notifications
+  app.get("/api/admin/notifications", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { limit } = req.query;
+      const alerts = await notificationService.getAdminNotifications(limit ? parseInt(limit as string) : 50);
+      res.json({ success: true, notifications: alerts });
+    } catch (error: any) {
+      console.error("Failed to fetch admin notifications:", error);
+      res.status(500).json({ error: error.message || "Failed to fetch admin notifications" });
+    }
+  });
+
+  // ==========================================
+  // MODULE 21: ANALYTICS API ENDPOINTS
+  // ==========================================
+
+  // Admin: Comprehensive Authoritative Analytics Aggregation
+  app.get("/api/admin/analytics", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const { range, startDate, endDate } = req.query;
+      const analytics = await analyticsService.getAnalytics({
+        range: (range as any) || '30d',
+        startDate: startDate ? String(startDate) : undefined,
+        endDate: endDate ? String(endDate) : undefined,
+      });
+
+      res.json({ success: true, analytics });
+    } catch (error: any) {
+      console.error("Failed to generate authoritative analytics:", error);
+      res.status(500).json({ error: error.message || "Failed to generate analytics report" });
     }
   });
 

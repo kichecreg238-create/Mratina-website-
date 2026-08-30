@@ -3,6 +3,7 @@ import { orders, refundRequests, refundAuditLogs, orderAuditLogs, payments, user
 import { eq, desc, and, or, sql, inArray, ilike } from 'drizzle-orm';
 import { paymentService, PaymentProvider, isValidProvider } from './payment.ts';
 import { orderOperationsService } from './orderOperations.ts';
+import { notificationService } from './notificationService.ts';
 
 export type RefundStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
@@ -173,6 +174,30 @@ export class RefundService {
           refundRequestId: newRefund.id,
           amount: refundAmount,
         },
+      });
+
+      // Safe notification dispatch
+      Promise.resolve().then(async () => {
+        try {
+          await notificationService.createNotification({
+            userId,
+            type: 'REFUND_UPDATE',
+            title: `Refund Requested for Order #${orderId}`,
+            message: `Your request for a refund of KES ${Number(refundAmount).toLocaleString()} for order #${orderId} is being reviewed.`,
+            relatedEntityType: 'REFUND',
+            relatedEntityId: newRefund.id,
+          });
+
+          await notificationService.notifyAdmins({
+            type: 'ADMIN_ALERT',
+            title: `New Refund Request #${newRefund.id}`,
+            message: `Customer requested refund of KES ${Number(refundAmount).toLocaleString()} on order #${orderId}. Reason: ${reason.trim()}`,
+            relatedEntityType: 'REFUND',
+            relatedEntityId: newRefund.id,
+          });
+        } catch (err) {
+          console.error('[Notification] Refund request notification error:', err);
+        }
       });
 
       return newRefund;
@@ -399,6 +424,22 @@ export class RefundService {
           metadata: { refundRequestId: refundId },
         });
 
+        // Safe notification
+        Promise.resolve().then(async () => {
+          try {
+            await notificationService.createNotification({
+              userId: refund.userId,
+              type: 'REFUND_UPDATE',
+              title: `Refund Request #${refundId} Update`,
+              message: `Your refund request for order #${order.id} was not approved. Reason: ${reason.trim()}`,
+              relatedEntityType: 'REFUND',
+              relatedEntityId: refundId,
+            });
+          } catch (err) {
+            console.error('[Notification] Refund rejection notification error:', err);
+          }
+        });
+
         return { refund: updatedRefund, order };
       }
 
@@ -510,6 +551,22 @@ export class RefundService {
             refundAmount: refund.amount,
             provider: providerName,
           },
+        });
+
+        // Safe notification
+        Promise.resolve().then(async () => {
+          try {
+            await notificationService.createNotification({
+              userId: refund.userId,
+              type: 'REFUND_UPDATE',
+              title: `Refund Approved: Order #${order.id}`,
+              message: `Your refund of KES ${Number(refund.amount).toLocaleString()} for order #${order.id} has been approved. Status: ${newRefundStatus}.`,
+              relatedEntityType: 'REFUND',
+              relatedEntityId: refundId,
+            });
+          } catch (err) {
+            console.error('[Notification] Refund approval notification error:', err);
+          }
         });
 
         return { refund: updatedRefund, order: updatedOrder };

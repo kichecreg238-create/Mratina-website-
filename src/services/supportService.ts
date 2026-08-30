@@ -1,6 +1,7 @@
 import { db } from '../db/index.ts';
 import { supportTickets, supportMessages, supportAuditLogs, users, orders } from '../db/schema.ts';
 import { eq, desc, and, or, sql, inArray } from 'drizzle-orm';
+import { notificationService } from './notificationService.ts';
 
 export type SupportCategory = 'ORDER_ISSUE' | 'DELIVERY_STATUS' | 'QUALITY_ISSUE' | 'PAYMENT_ISSUE' | 'ACCOUNT_INQUIRY' | 'OTHER';
 export type SupportStatus = 'OPEN' | 'IN_PROGRESS' | 'RESOLVED' | 'CLOSED';
@@ -94,6 +95,30 @@ export class SupportService {
           priority,
           orderId: linkedOrderId,
         },
+      });
+
+      // Safe notification
+      Promise.resolve().then(async () => {
+        try {
+          await notificationService.createNotification({
+            userId,
+            type: 'SUPPORT_RESPONSE',
+            title: `Support Ticket Opened: #${newTicket.ticketNumber}`,
+            message: `Your support request regarding "${subject}" has been received. Our concierge team is on it.`,
+            relatedEntityType: 'SUPPORT_TICKET',
+            relatedEntityId: newTicket.id,
+          });
+
+          await notificationService.notifyAdmins({
+            type: 'ADMIN_ALERT',
+            title: `New Support Ticket: #${newTicket.ticketNumber}`,
+            message: `[${priority}] ${userEmail} opened ticket: "${subject}" (${category})`,
+            relatedEntityType: 'SUPPORT_TICKET',
+            relatedEntityId: newTicket.id,
+          });
+        } catch (err) {
+          console.error('[Notification] Support ticket creation notification error:', err);
+        }
       });
 
       return { ticket: newTicket, message: initialMessage };
@@ -346,6 +371,36 @@ export class SupportService {
           : `Reply sent by ${sender.email}`,
       });
 
+      // Safe notification
+      if (!effectiveInternalNote) {
+        Promise.resolve().then(async () => {
+          try {
+            if (sender.role === 'ADMIN') {
+              // Notify customer
+              await notificationService.createNotification({
+                userId: ticket.userId,
+                type: 'SUPPORT_RESPONSE',
+                title: `Support Update: #${ticket.ticketNumber}`,
+                message: `Our concierge team replied to ticket #${ticket.ticketNumber}: "${ticket.subject}"`,
+                relatedEntityType: 'SUPPORT_TICKET',
+                relatedEntityId: ticketId,
+              });
+            } else {
+              // Customer replied -> notify admins
+              await notificationService.notifyAdmins({
+                type: 'ADMIN_ALERT',
+                title: `Reply on Ticket #${ticket.ticketNumber}`,
+                message: `Customer ${sender.email} replied to ticket: "${ticket.subject}"`,
+                relatedEntityType: 'SUPPORT_TICKET',
+                relatedEntityId: ticketId,
+              });
+            }
+          } catch (err) {
+            console.error('[Notification] Support reply notification error:', err);
+          }
+        });
+      }
+
       return newMsg;
     });
   }
@@ -391,6 +446,24 @@ export class SupportService {
         toStatus: newStatus,
         details: reasonOrNotes || `Ticket status changed from ${ticket.status} to ${newStatus} by ${actor.email}`,
       });
+
+      // Safe notification on resolution/closure
+      if (newStatus === 'RESOLVED' || newStatus === 'CLOSED') {
+        Promise.resolve().then(async () => {
+          try {
+            await notificationService.createNotification({
+              userId: ticket.userId,
+              type: 'SUPPORT_RESPONSE',
+              title: `Support Ticket #${ticket.ticketNumber} ${newStatus}`,
+              message: `Your support ticket regarding "${ticket.subject}" has been marked as ${newStatus}.`,
+              relatedEntityType: 'SUPPORT_TICKET',
+              relatedEntityId: ticketId,
+            });
+          } catch (err) {
+            console.error('[Notification] Support resolution notification error:', err);
+          }
+        });
+      }
 
       return updatedTicket;
     });

@@ -1,6 +1,7 @@
 import { db } from '../db/index.ts';
 import { orders, orderItems, deliveries, payments, variants, users, products, orderAuditLogs } from '../db/schema.ts';
 import { eq, desc, inArray, and, sql } from 'drizzle-orm';
+import { notificationService } from './notificationService.ts';
 
 export type OrderStatus = 'PENDING' | 'CONFIRMED' | 'PROCESSING' | 'PICKUP_READY' | 'OUT_FOR_DELIVERY' | 'DELIVERED' | 'FAILED' | 'CANCELLED';
 export type PaymentState = 'INITIATED' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'REFUNDED';
@@ -148,6 +149,23 @@ export class OrderOperationsService {
         reason: reason || null,
         metadata: metadata || null,
       }, tx);
+
+      // Trigger notification safely (non-blocking)
+      Promise.resolve().then(async () => {
+        try {
+          await notificationService.createNotification({
+            userId: order.userId,
+            type: 'ORDER_STATUS',
+            title: `Order #${orderId} Updated: ${newStatus}`,
+            message: `Your order #${orderId} has transitioned to ${newStatus}.${reason ? ` (${reason})` : ''}`,
+            relatedEntityType: 'ORDER',
+            relatedEntityId: orderId,
+            metadata: { fromState: currentStatus, toState: newStatus }
+          });
+        } catch (err) {
+          console.error('[Notification] Order status transition notification failed:', err);
+        }
+      });
 
       return updatedOrder;
     });

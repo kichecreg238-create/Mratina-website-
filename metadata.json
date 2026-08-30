@@ -1,6 +1,6 @@
 {
   "name": "Mratina",
-  "description": "Artisanal honey-wine and spirits platform with dispatch logistics, verified customer reviews, payment verification, and order operations.",
+  "description": "Artisanal honey-wine and spirits platform with dispatch logistics, verified customer reviews, refund governance, real-time customer/admin notifications, and executive analytics.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

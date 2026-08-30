@@ -1,6 +1,7 @@
 import { db } from './index.ts';
 import { products, variants, orders, orderItems, deliveryZones, deliveries, orderAuditLogs } from './schema.ts';
 import { eq, inArray } from 'drizzle-orm';
+import { notificationService } from '../services/notificationService.ts';
 
 export async function getActiveProducts() {
   const allProducts = await db.select().from(products).where(eq(products.isActive, true));
@@ -126,6 +127,30 @@ export async function createOrder(userId: number, items: { variantId: number; qu
       }
     });
     
+    // Safely emit notifications (asynchronous non-blocking)
+    Promise.resolve().then(async () => {
+      try {
+        await notificationService.createNotification({
+          userId,
+          type: 'ORDER_STATUS',
+          title: `Order #${order.id} Placed`,
+          message: `Your order for KES ${Number(grandTotal).toLocaleString()} has been placed and is awaiting confirmation.`,
+          relatedEntityType: 'ORDER',
+          relatedEntityId: order.id,
+        });
+
+        await notificationService.notifyAdmins({
+          type: 'ADMIN_ALERT',
+          title: `New Order #${order.id}`,
+          message: `New order #${order.id} received in zone ${zone.name} for KES ${Number(grandTotal).toLocaleString()}.`,
+          relatedEntityType: 'ORDER',
+          relatedEntityId: order.id,
+        });
+      } catch (err) {
+        console.error('[Notification] Order placement notification error:', err);
+      }
+    });
+
     return order;
   });
 }

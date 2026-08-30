@@ -32,16 +32,21 @@ import {
   Sliders,
   Star,
   RotateCcw,
-  LifeBuoy
+  LifeBuoy,
+  BarChart3,
+  Bell
 } from 'lucide-react';
 
 import { AdminCMSPanel } from '../components/AdminCMSPanel.tsx';
 import { AdminReviewsPanel } from '../components/AdminReviewsPanel.tsx';
 import { AdminRefundsPanel } from '../components/AdminRefundsPanel.tsx';
 import { AdminSupportPanel } from '../components/AdminSupportPanel.tsx';
+import { AdminAnalyticsPanel } from '../components/AdminAnalyticsPanel.tsx';
+import { AdminNotificationsPanel } from '../components/AdminNotificationsPanel.tsx';
 
 export type AdminTab =
   | 'OVERVIEW'
+  | 'ANALYTICS'
   | 'ORDERS'
   | 'CATALOGUE'
   | 'PRICING'
@@ -50,6 +55,7 @@ export type AdminTab =
   | 'PAYMENTS'
   | 'REFUNDS'
   | 'SUPPORT'
+  | 'NOTIFICATIONS'
   | 'STAFF'
   | 'CMS'
   | 'REVIEWS'
@@ -679,6 +685,7 @@ export const AdminDashboard = () => {
       <nav className="border-b border-white/10 bg-[#080808] px-4 md:px-8 py-2 overflow-x-auto scrollbar-none flex items-center space-x-1">
         {[
           { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
+          { id: 'ANALYTICS', label: 'Analytics & KPIs', icon: BarChart3 },
           { id: 'ORDERS', label: 'Orders', icon: ShoppingBag, count: orders.length },
           { id: 'CATALOGUE', label: 'Catalogue', icon: Package, count: products.length },
           { id: 'PRICING', label: 'Pricing', icon: DollarSign },
@@ -687,6 +694,7 @@ export const AdminDashboard = () => {
           { id: 'PAYMENTS', label: 'Payments', icon: CreditCard, count: paymentsList.length },
           { id: 'REFUNDS', label: 'Refunds', icon: RotateCcw },
           { id: 'SUPPORT', label: 'Support / Tickets', icon: LifeBuoy },
+          { id: 'NOTIFICATIONS', label: 'Alerts Feed', icon: Bell },
           { id: 'STAFF', label: 'Staff / Deliverers', icon: Users, count: deliverers.length },
           { id: 'CMS', label: 'CMS & Visuals', icon: Sliders },
           { id: 'REVIEWS', label: 'Reviews', icon: Star },
@@ -897,10 +905,22 @@ export const AdminDashboard = () => {
               </div>
               <div className="flex items-center space-x-2">
                 <button
+                  onClick={() => setActiveTab('ANALYTICS')}
+                  className="px-3 py-1.5 bg-[#c5a059] hover:bg-[#d6b26a] text-black font-bold text-xs font-mono tracking-wider uppercase"
+                >
+                  View Analytics & KPIs →
+                </button>
+                <button
                   onClick={() => setActiveTab('ORDERS')}
                   className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white font-mono tracking-wider uppercase"
                 >
                   Manage Orders
+                </button>
+                <button
+                  onClick={() => setActiveTab('NOTIFICATIONS')}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 border border-white/10 text-xs text-white font-mono tracking-wider uppercase"
+                >
+                  Alerts Stream
                 </button>
                 <button
                   onClick={() => setActiveTab('PRICING')}
@@ -917,6 +937,11 @@ export const AdminDashboard = () => {
               </div>
             </div>
           </div>
+        )}
+
+        {/* ANALYTICS TAB (MODULE 21) */}
+        {activeTab === 'ANALYTICS' && (
+          <AdminAnalyticsPanel />
         )}
 
         {/* 2. ORDERS TAB (Module 15 Operational Controls) */}
@@ -1557,6 +1582,18 @@ export const AdminDashboard = () => {
               }}
             />
           </div>
+        )}
+
+        {/* NOTIFICATIONS TAB (MODULE 20) */}
+        {activeTab === 'NOTIFICATIONS' && (
+          <AdminNotificationsPanel
+            onSelectOrder={(id) => {
+              setActiveTab('ORDERS');
+              openOrderOperations(id);
+            }}
+            onSelectRefund={() => setActiveTab('REFUNDS')}
+            onSelectSupportTicket={() => setActiveTab('SUPPORT')}
+          />
         )}
 
         {/* 8. STAFF / DELIVERERS TAB */}

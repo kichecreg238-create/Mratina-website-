@@ -412,3 +412,47 @@ export const orderItemsRelations = relations(orderItems, ({ one }) => ({
     references: [variants.id],
   }),
 }));
+
+// Notifications (Module 20 - User & Operational Notifications)
+export const notifications = pgTable('notifications', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+  type: text('type').notNull(), // 'ORDER_STATUS', 'PAYMENT_UPDATE', 'DELIVERY_UPDATE', 'REFUND_UPDATE', 'SUPPORT_RESPONSE', 'ADMIN_ALERT', 'SYSTEM'
+  title: text('title').notNull(),
+  message: text('message').notNull(),
+  relatedEntityType: text('related_entity_type'), // 'ORDER', 'PAYMENT', 'REFUND', 'SUPPORT_TICKET', 'PRODUCT', 'SYSTEM'
+  relatedEntityId: integer('related_entity_id'),
+  isRead: boolean('is_read').default(false).notNull(),
+  readAt: timestamp('read_at'),
+  channel: text('channel').default('IN_APP').notNull(), // 'IN_APP', 'EMAIL_PENDING', 'SMS_PENDING', 'EXTERNAL_UNAVAILABLE'
+  metadata: jsonb('metadata'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Notification Preferences (Module 20 - User preferences)
+export const notificationPreferences = pgTable('notification_preferences', {
+  id: serial('id').primaryKey(),
+  userId: integer('user_id').notNull().unique().references(() => users.id, { onDelete: 'cascade' }),
+  orderUpdates: boolean('order_updates').default(true).notNull(),
+  deliveryUpdates: boolean('delivery_updates').default(true).notNull(),
+  paymentUpdates: boolean('payment_updates').default(true).notNull(),
+  supportUpdates: boolean('support_updates').default(true).notNull(),
+  refundUpdates: boolean('refund_updates').default(true).notNull(),
+  adminAlerts: boolean('admin_alerts').default(true).notNull(),
+  promotionalUpdates: boolean('promotional_updates').default(false).notNull(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+export const notificationsRelations = relations(notifications, ({ one }) => ({
+  user: one(users, {
+    fields: [notifications.userId],
+    references: [users.id],
+  }),
+}));
+
+export const notificationPreferencesRelations = relations(notificationPreferences, ({ one }) => ({
+  user: one(users, {
+    fields: [notificationPreferences.userId],
+    references: [users.id],
+  }),
+}));
