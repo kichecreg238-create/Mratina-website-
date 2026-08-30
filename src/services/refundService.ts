@@ -6,6 +6,19 @@ import { orderOperationsService } from './orderOperations.ts';
 
 export type RefundStatus = 'REQUESTED' | 'APPROVED' | 'REJECTED' | 'PROCESSING' | 'COMPLETED' | 'FAILED';
 
+export function isValidRefundTransition(from: RefundStatus, to: RefundStatus): boolean {
+  if (from === to) return false;
+  switch (from) {
+    case 'REQUESTED': return ['APPROVED', 'REJECTED', 'PROCESSING', 'COMPLETED', 'FAILED'].includes(to);
+    case 'PROCESSING': return ['COMPLETED', 'FAILED'].includes(to);
+    case 'APPROVED': return ['PROCESSING', 'COMPLETED', 'FAILED'].includes(to);
+    case 'COMPLETED': return false;
+    case 'REJECTED': return false;
+    case 'FAILED': return ['PROCESSING', 'COMPLETED'].includes(to);
+    default: return false;
+  }
+}
+
 export interface RefundEligibilityResult {
   isEligible: boolean;
   order?: any;
@@ -67,6 +80,15 @@ export class RefundService {
       };
     }
 
+    // Order status validation: Order must be delivered, cancelled, or failed
+    if (!['DELIVERED', 'CANCELLED', 'FAILED'].includes(order.status)) {
+      return {
+        isEligible: false,
+        order,
+        reason: `Refunds can only be requested for delivered, cancelled, or failed orders (currently ${order.status}).`,
+      };
+    }
+
     return {
       isEligible: true,
       order,
@@ -90,9 +112,16 @@ export class RefundService {
     }
 
     const order = eligibility.order;
-    const refundAmount = amount && Number(amount) > 0 && Number(amount) <= Number(order.totalAmount)
-      ? Number(amount).toFixed(2)
-      : order.totalAmount;
+    
+    // Authoritative amount calculation & validation
+    let refundAmount = order.totalAmount;
+    if (amount !== undefined && amount !== null) {
+      const parsed = Number(amount);
+      if (isNaN(parsed) || parsed <= 0 || parsed > Number(order.totalAmount)) {
+        throw new Error(`Requested refund amount (KES ${amount}) is invalid or exceeds authoritative order total of KES ${Number(order.totalAmount).toLocaleString()}.`);
+      }
+      refundAmount = parsed.toFixed(2);
+    }
 
     // Find original payment info if available
     const paymentRecords = await db.select()
@@ -375,13 +404,18 @@ export class RefundService {
 
       // Handle Approval
       if (action === 'APPROVE') {
-        // Double-refund protection: verify no other completed/approved refund on this order
+        // Double-refund protection: check order payment state
+        if (order.paymentState === 'REFUNDED') {
+          throw new Error(`Cannot approve refund: Order #${order.id} payment is already marked as REFUNDED.`);
+        }
+
+        // Double-refund protection: verify no other completed/approved/processing refund on this order
         const duplicateCheck = await tx.select()
           .from(refundRequests)
           .where(
             and(
               eq(refundRequests.orderId, order.id),
-              inArray(refundRequests.status, ['APPROVED', 'COMPLETED'])
+              inArray(refundRequests.status, ['APPROVED', 'COMPLETED', 'PROCESSING'])
             )
           );
 
@@ -405,9 +439,20 @@ export class RefundService {
           providerResult = { success: false, isConfigured: false, error: err.message };
         }
 
-        // In sandbox or unconfigured environments, we record provider initiation.
-        // If provider confirms success OR is an administrative approval in sandbox, mark as COMPLETED.
-        const newRefundStatus: RefundStatus = 'COMPLETED';
+        // Provider result handling:
+        // - If provider is configured and succeeds: COMPLETED
+        // - If provider is configured and fails: FAILED
+        // - If provider integration is unconfigured/manual: APPROVED (authorized by admin, pending manual/gateway settlement)
+        let newRefundStatus: RefundStatus = 'APPROVED';
+        if (providerResult.isConfigured) {
+          newRefundStatus = providerResult.success ? 'COMPLETED' : 'FAILED';
+        } else {
+          newRefundStatus = 'APPROVED';
+        }
+
+        if (!isValidRefundTransition(refund.status as RefundStatus, newRefundStatus)) {
+          throw new Error(`Invalid refund state transition from ${refund.status} to ${newRefundStatus}.`);
+        }
 
         const [updatedRefund] = await tx.update(refundRequests)
           .set({
@@ -420,14 +465,18 @@ export class RefundService {
           .where(eq(refundRequests.id, refundId))
           .returning();
 
-        // Update Order payment state to REFUNDED authoritatively (respecting order state machine)
-        const [updatedOrder] = await tx.update(orders)
-          .set({
-            paymentState: 'REFUNDED',
-            updatedAt: new Date(),
-          })
-          .where(eq(orders.id, order.id))
-          .returning();
+        // Update Order payment state to REFUNDED authoritatively when refund is approved/completed
+        let updatedOrder = order;
+        if (newRefundStatus === 'APPROVED' || newRefundStatus === 'COMPLETED') {
+          const [resOrder] = await tx.update(orders)
+            .set({
+              paymentState: 'REFUNDED',
+              updatedAt: new Date(),
+            })
+            .where(eq(orders.id, order.id))
+            .returning();
+          updatedOrder = resOrder;
+        }
 
         // Record refund audit log
         await tx.insert(refundAuditLogs).values({

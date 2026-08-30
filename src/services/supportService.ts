@@ -29,6 +29,18 @@ export class SupportService {
       throw new Error('Message details are required (at least 5 characters).');
     }
 
+    const VALID_CATEGORIES: SupportCategory[] = ['ORDER_ISSUE', 'DELIVERY_STATUS', 'QUALITY_ISSUE', 'PAYMENT_ISSUE', 'ACCOUNT_INQUIRY', 'OTHER'];
+    const VALID_PRIORITIES: SupportPriority[] = ['LOW', 'MEDIUM', 'HIGH', 'URGENT'];
+
+    if (!VALID_CATEGORIES.includes(category)) {
+      throw new Error(`Invalid support category: ${category}`);
+    }
+
+    const effectivePriority = priority || 'MEDIUM';
+    if (!VALID_PRIORITIES.includes(effectivePriority)) {
+      throw new Error(`Invalid support priority: ${priority}`);
+    }
+
     let linkedOrderId: number | null = null;
     if (orderId) {
       const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
