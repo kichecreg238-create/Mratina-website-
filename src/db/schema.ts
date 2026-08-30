@@ -456,3 +456,23 @@ export const notificationPreferencesRelations = relations(notificationPreference
     references: [users.id],
   }),
 }));
+
+// Product Views (Module 21 - Authoritative View Tracking for Product Conversion)
+export const productViews = pgTable('product_views', {
+  id: serial('id').primaryKey(),
+  productId: integer('product_id').notNull().references(() => products.id, { onDelete: 'cascade' }),
+  sessionId: text('session_id'),
+  userId: integer('user_id').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const productViewsRelations = relations(productViews, ({ one }) => ({
+  product: one(products, {
+    fields: [productViews.productId],
+    references: [products.id],
+  }),
+  user: one(users, {
+    fields: [productViews.userId],
+    references: [users.id],
+  }),
+}));

@@ -151,17 +151,104 @@ export class OrderOperationsService {
       }, tx);
 
       // Trigger notification safely (non-blocking)
+      const assignedDelivererId = order.delivererId;
+
       Promise.resolve().then(async () => {
         try {
+          // If delivererId was not on order, check delivery record
+          let courierId = assignedDelivererId;
+          if (!courierId) {
+            const deliv = await db.select().from(deliveries).where(eq(deliveries.orderId, orderId));
+            if (deliv.length > 0 && deliv[0].delivererId) {
+              courierId = deliv[0].delivererId;
+            }
+          }
+          let customerTitle = `Order #${orderId} Updated: ${newStatus}`;
+          let customerMessage = `Your order #${orderId} has transitioned to ${newStatus}.${reason ? ` (${reason})` : ''}`;
+
+          if (newStatus === 'CONFIRMED') {
+            customerTitle = `Order #${orderId} Confirmed`;
+            customerMessage = `Your order #${orderId} has been confirmed and is being prepared for fulfillment.`;
+          } else if (newStatus === 'PROCESSING') {
+            customerTitle = `Order #${orderId} Preparing`;
+            customerMessage = `Your order #${orderId} is being prepared at the cellar.`;
+          } else if (newStatus === 'PICKUP_READY') {
+            customerTitle = `Order #${orderId} Packed & Ready`;
+            customerMessage = `Your order #${orderId} is packed and ready for courier pickup.`;
+          } else if (newStatus === 'OUT_FOR_DELIVERY') {
+            customerTitle = `Order #${orderId} Out for Delivery`;
+            customerMessage = `Your order #${orderId} is out for delivery with our courier.`;
+          } else if (newStatus === 'DELIVERED') {
+            customerTitle = `Order #${orderId} Delivered`;
+            customerMessage = `Your order #${orderId} has been delivered. Enjoy your Mratina!`;
+          } else if (newStatus === 'CANCELLED') {
+            customerTitle = `Order #${orderId} Cancelled`;
+            customerMessage = `Your order #${orderId} has been cancelled.${reason ? ` Reason: ${reason}` : ''}`;
+          } else if (newStatus === 'FAILED') {
+            customerTitle = `Order #${orderId} Delivery Issue`;
+            customerMessage = `There was an issue fulfilling order #${orderId}.${reason ? ` Details: ${reason}` : ''}`;
+          }
+
           await notificationService.createNotification({
             userId: order.userId,
             type: 'ORDER_STATUS',
-            title: `Order #${orderId} Updated: ${newStatus}`,
-            message: `Your order #${orderId} has transitioned to ${newStatus}.${reason ? ` (${reason})` : ''}`,
+            title: customerTitle,
+            message: customerMessage,
             relatedEntityType: 'ORDER',
             relatedEntityId: orderId,
             metadata: { fromState: currentStatus, toState: newStatus }
           });
+
+          // 2. Staff Alert for delivery requirement or failure
+          if (newStatus === 'CONFIRMED' && !courierId) {
+            await notificationService.notifyAdmins({
+              type: 'ADMIN_ALERT',
+              title: `Delivery Required: Order #${orderId}`,
+              message: `Order #${orderId} in zone ${order.deliveryZone || 'Standard'} is confirmed and requires courier assignment.`,
+              relatedEntityType: 'ORDER',
+              relatedEntityId: orderId,
+            });
+          } else if (newStatus === 'FAILED') {
+            await notificationService.notifyAdmins({
+              type: 'ADMIN_ALERT',
+              title: `Order #${orderId} Failed`,
+              message: `Order #${orderId} marked failed.${reason ? ` Reason: ${reason}` : ''}`,
+              relatedEntityType: 'ORDER',
+              relatedEntityId: orderId,
+            });
+          }
+
+          // 3. Deliverer Notification if assigned
+          if (courierId) {
+            if (newStatus === 'CANCELLED') {
+              await notificationService.createNotification({
+                userId: courierId,
+                type: 'DELIVERY_UPDATE',
+                title: `Delivery Cancelled: Order #${orderId}`,
+                message: `Order #${orderId} delivery has been cancelled.${reason ? ` Reason: ${reason}` : ''}`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            } else if (newStatus === 'FAILED') {
+              await notificationService.createNotification({
+                userId: courierId,
+                type: 'DELIVERY_UPDATE',
+                title: `Delivery Failed: Order #${orderId}`,
+                message: `Order #${orderId} delivery was marked failed.${reason ? ` Reason: ${reason}` : ''}`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            } else if (newStatus === 'PROCESSING' || newStatus === 'PICKUP_READY') {
+              await notificationService.createNotification({
+                userId: courierId,
+                type: 'DELIVERY_UPDATE',
+                title: `Order #${orderId} ${newStatus === 'PICKUP_READY' ? 'Ready for Pickup' : 'Being Prepared'}`,
+                message: `Order #${orderId} is ${newStatus === 'PICKUP_READY' ? 'packed and ready for collection' : 'currently being prepared'} at the cellar.`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            }
+          }
         } catch (err) {
           console.error('[Notification] Order status transition notification failed:', err);
         }
@@ -243,6 +330,42 @@ export class OrderOperationsService {
         reason: reason.trim(),
         metadata: { initiatedBy: 'CUSTOMER' }
       }, tx);
+
+      const assignedDelivererId = order.delivererId || (delRes.length > 0 ? delRes[0].delivererId : null);
+
+      Promise.resolve().then(async () => {
+        try {
+          await notificationService.createNotification({
+            userId,
+            type: 'ORDER_STATUS',
+            title: `Order #${orderId} Cancelled`,
+            message: `Your cancellation request for order #${orderId} has been confirmed.`,
+            relatedEntityType: 'ORDER',
+            relatedEntityId: orderId,
+          });
+
+          await notificationService.notifyAdmins({
+            type: 'ADMIN_ALERT',
+            title: `Order #${orderId} Cancelled by Customer`,
+            message: `Customer cancelled order #${orderId}. Reason: ${reason.trim()}`,
+            relatedEntityType: 'ORDER',
+            relatedEntityId: orderId,
+          });
+
+          if (assignedDelivererId) {
+            await notificationService.createNotification({
+              userId: assignedDelivererId,
+              type: 'DELIVERY_UPDATE',
+              title: `Delivery Cancelled: Order #${orderId}`,
+              message: `Order #${orderId} was cancelled by the customer.`,
+              relatedEntityType: 'ORDER',
+              relatedEntityId: orderId,
+            });
+          }
+        } catch (err) {
+          console.error('[Notification] Customer cancellation notification failed:', err);
+        }
+      });
 
       return updatedOrder;
     });

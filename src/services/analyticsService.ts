@@ -10,6 +10,8 @@ import {
   users,
   supportTickets,
   deliveryZones,
+  productViews,
+  reviews,
 } from '../db/schema.ts';
 import { eq, and, gte, lte, desc, sql, inArray } from 'drizzle-orm';
 
@@ -17,6 +19,31 @@ export interface AnalyticsDateFilter {
   range?: '7d' | '30d' | '90d' | 'all' | 'custom';
   startDate?: string;
   endDate?: string;
+}
+
+export interface ProductPerformanceItem {
+  productId: number;
+  productName: string;
+  category: string;
+  views: number;
+  distinctOrdersCount: number;
+  unitsSold: number;
+  revenue: number;
+  conversionRate: number; // Definition: (distinctOrdersCount / views) * 100
+  averageRating: number | null;
+  approvedReviewCount: number;
+  currentStock: number;
+}
+
+export interface DelivererPerformanceItem {
+  delivererId: number;
+  delivererEmail: string;
+  assignedDeliveries: number;
+  completedDeliveries: number;
+  failedDeliveries: number;
+  activeDeliveries: number;
+  completionRate: number;
+  averageDeliveryMinutes: number | null;
 }
 
 export interface AnalyticsSummary {
@@ -45,14 +72,7 @@ export interface AnalyticsSummary {
     ordersCount: number;
     completedCount: number;
   }>;
-  productPerformance: Array<{
-    productId: number;
-    productName: string;
-    category: string;
-    unitsSold: number;
-    revenue: number;
-    currentStock: number;
-  }>;
+  productPerformance: ProductPerformanceItem[];
   categoryBreakdown: Array<{
     category: string;
     unitsSold: number;
@@ -65,11 +85,14 @@ export interface AnalyticsSummary {
     failedCount: number;
     inTransitCount: number;
     fulfillmentRate: number;
+    averageDeliveryMinutes: number | null;
+    averageDeliveryTimeFormatted: string;
     zones: Array<{
       zoneName: string;
       orderCount: number;
       revenue: number;
     }>;
+    delivererPerformance: DelivererPerformanceItem[];
   };
   paymentAnalytics: {
     totalTransactions: number;
@@ -145,6 +168,48 @@ export class AnalyticsService {
   }
 
   /**
+   * Records a product view event in the database.
+   */
+  async recordProductView(params: { productId: number; sessionId?: string; userId?: number }) {
+    try {
+      const { productId, sessionId, userId } = params;
+
+      // Ensure product exists
+      const prodRes = await db.select({ id: products.id }).from(products).where(eq(products.id, productId));
+      if (prodRes.length === 0) return null;
+
+      // Throttle: Don't record multiple views from the same session/user within 10 minutes
+      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+      const recentViews = await db.select({ id: productViews.id })
+        .from(productViews)
+        .where(
+          and(
+            eq(productViews.productId, productId),
+            sessionId ? eq(productViews.sessionId, sessionId) : undefined,
+            userId ? eq(productViews.userId, userId) : undefined,
+            gte(productViews.createdAt, tenMinutesAgo)
+          )
+        )
+        .limit(1);
+
+      if (recentViews.length > 0) {
+        return null; // Throttled
+      }
+
+      const [view] = await db.insert(productViews).values({
+        productId,
+        sessionId: sessionId || null,
+        userId: userId || null,
+      }).returning();
+
+      return view;
+    } catch (err) {
+      console.error('[AnalyticsService] Failed to record product view:', err);
+      return null;
+    }
+  }
+
+  /**
    * Computes authoritative analytics from persisted relational data.
    */
   async getAnalytics(filter: AnalyticsDateFilter = {}): Promise<AnalyticsSummary> {
@@ -206,7 +271,25 @@ export class AnalyticsService {
       });
     }
 
-    // 7. Fetch Users & Support Tickets
+    // 7. Fetch Product Views
+    let allProductViews: any[] = [];
+    try {
+      allProductViews = await db.select().from(productViews);
+      if (start && end) {
+        allProductViews = allProductViews.filter(v => {
+          if (!v.createdAt) return false;
+          const vDate = new Date(v.createdAt);
+          return vDate >= start && vDate <= end;
+        });
+      }
+    } catch (err) {
+      console.warn('[AnalyticsService] productViews query error or table initializing:', err);
+    }
+
+    // 8. Fetch Approved Reviews (Module 18 source of truth)
+    const approvedReviews = await db.select().from(reviews).where(eq(reviews.isApproved, true));
+
+    // 9. Fetch Users & Support Tickets
     const allUsers = await db.select().from(users);
     let allTickets = await db.select().from(supportTickets);
     if (start && end) {
@@ -267,8 +350,8 @@ export class AnalyticsService {
       }))
       .sort((a, b) => a.date.localeCompare(b.date));
 
-    // --- PRODUCT & CATEGORY PERFORMANCE ---
-    const productStatsMap = new Map<number, { unitsSold: number; revenue: number }>();
+    // --- PRODUCT & CATEGORY PERFORMANCE WITH VIEWS & CONVERSION ---
+    const productStatsMap = new Map<number, { unitsSold: number; revenue: number; distinctOrderIds: Set<number> }>();
     const categoryStatsMap = new Map<string, { unitsSold: number; revenue: number }>();
 
     for (const item of allOrderItems) {
@@ -281,9 +364,10 @@ export class AnalyticsService {
       const lineRevenue = units * Number(item.priceAtPurchase || variant.price);
 
       // Product grouping
-      const pStats = productStatsMap.get(product.id) || { unitsSold: 0, revenue: 0 };
+      const pStats = productStatsMap.get(product.id) || { unitsSold: 0, revenue: 0, distinctOrderIds: new Set<number>() };
       pStats.unitsSold += units;
       pStats.revenue += lineRevenue;
+      pStats.distinctOrderIds.add(item.orderId);
       productStatsMap.set(product.id, pStats);
 
       // Category grouping
@@ -294,23 +378,60 @@ export class AnalyticsService {
       categoryStatsMap.set(catKey, cStats);
     }
 
-    const productPerformance = Array.from(productStatsMap.entries())
-      .map(([productId, stats]) => {
-        const prod = productMap.get(productId);
-        const relatedVariants = allVariants.filter(v => v.productId === productId);
+    // Aggregate Product Views
+    const productViewCountMap = new Map<number, number>();
+    for (const pv of allProductViews) {
+      productViewCountMap.set(pv.productId, (productViewCountMap.get(pv.productId) || 0) + 1);
+    }
+
+    // Aggregate Approved Reviews per product
+    const productReviewsMap = new Map<number, { count: number; totalRating: number }>();
+    for (const rev of approvedReviews) {
+      const entry = productReviewsMap.get(rev.productId) || { count: 0, totalRating: 0 };
+      entry.count += 1;
+      entry.totalRating += rev.rating;
+      productReviewsMap.set(rev.productId, entry);
+    }
+
+    const productPerformance: ProductPerformanceItem[] = allProducts
+      .map(prod => {
+        const stats = productStatsMap.get(prod.id) || { unitsSold: 0, revenue: 0, distinctOrderIds: new Set<number>() };
+        const relatedVariants = allVariants.filter(v => v.productId === prod.id);
         const totalStock = relatedVariants.reduce((sum, v) => sum + v.stock, 0);
+        const views = productViewCountMap.get(prod.id) || 0;
+        const distinctOrders = stats.distinctOrderIds.size;
+
+        /**
+         * Conversion Rate Definition:
+         * (Distinct Orders Containing Product / Recorded Views) * 100
+         * If views > 0, returns the calculated percentage.
+         * If views === 0 but orders exist, conversion is 100%.
+         * Otherwise returns 0.
+         */
+        const conversionRate = views > 0
+          ? Number(((distinctOrders / views) * 100).toFixed(1))
+          : distinctOrders > 0 ? 100 : 0;
+
+        const revData = productReviewsMap.get(prod.id);
+        const averageRating = revData && revData.count > 0
+          ? Number((revData.totalRating / revData.count).toFixed(1))
+          : null;
 
         return {
-          productId,
-          productName: prod?.name || 'Unknown Product',
-          category: prod?.category || 'OTHER',
+          productId: prod.id,
+          productName: prod.name,
+          category: prod.category || 'OTHER',
+          views,
+          distinctOrdersCount: distinctOrders,
           unitsSold: stats.unitsSold,
           revenue: Number(stats.revenue.toFixed(2)),
+          conversionRate,
+          averageRating,
+          approvedReviewCount: revData ? revData.count : 0,
           currentStock: totalStock,
         };
       })
-      .sort((a, b) => b.revenue - a.revenue)
-      .slice(0, 15);
+      .sort((a, b) => b.revenue - a.revenue);
 
     const totalCategoryRevenue = Array.from(categoryStatsMap.values()).reduce((sum, c) => sum + c.revenue, 0);
     const categoryBreakdown = Array.from(categoryStatsMap.entries())
@@ -322,7 +443,7 @@ export class AnalyticsService {
       }))
       .sort((a, b) => b.revenue - a.revenue);
 
-    // --- DELIVERY & ZONE PERFORMANCE ---
+    // --- DELIVERY & ZONE PERFORMANCE & AVERAGE DELIVERY TIME ---
     const zoneMap = new Map<string, { orderCount: number; revenue: number }>();
     for (const order of allOrders) {
       const zName = order.deliveryZone || 'Standard Kakamega';
@@ -334,13 +455,40 @@ export class AnalyticsService {
       zoneMap.set(zName, zEntry);
     }
 
-    const deliveredDeliveries = allDeliveries.filter(d => d.status === 'DELIVERED').length;
+    const deliveredDeliveries = allDeliveries.filter(d => d.status === 'DELIVERED');
     const failedDeliveries = allDeliveries.filter(d => d.status === 'FAILED').length;
     const inTransitDeliveries = allDeliveries.filter(d => ['ACCEPTED', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(d.status)).length;
     const totalDeliveries = allDeliveries.length;
     const fulfillmentRate = totalDeliveries > 0
-      ? Number(((deliveredDeliveries / totalDeliveries) * 100).toFixed(1))
+      ? Number(((deliveredDeliveries.length / totalDeliveries) * 100).toFixed(1))
       : 100;
+
+    // Calculate Average Delivery Time from authoritative timestamps
+    let totalDeliveryDurationMinutes = 0;
+    let validDeliveryTimestampCount = 0;
+
+    for (const d of deliveredDeliveries) {
+      if (d.deliveredAt) {
+        const startTs = d.pickedUpAt || d.outForDeliveryAt || d.acceptedAt || d.assignedAt || d.createdAt;
+        if (startTs) {
+          const duration = (new Date(d.deliveredAt).getTime() - new Date(startTs).getTime()) / (1000 * 60);
+          if (duration > 0 && duration < 10080) { // Filter unrealistic outliers (> 7 days)
+            totalDeliveryDurationMinutes += duration;
+            validDeliveryTimestampCount += 1;
+          }
+        }
+      }
+    }
+
+    const averageDeliveryMinutes = validDeliveryTimestampCount > 0
+      ? Math.round(totalDeliveryDurationMinutes / validDeliveryTimestampCount)
+      : null;
+
+    const averageDeliveryTimeFormatted = averageDeliveryMinutes !== null
+      ? (averageDeliveryMinutes >= 60
+          ? `${Math.floor(averageDeliveryMinutes / 60)}h ${averageDeliveryMinutes % 60}m`
+          : `${averageDeliveryMinutes} mins`)
+      : 'Unavailable (Pending delivered runs)';
 
     const deliveryZonesData = Array.from(zoneMap.entries())
       .map(([zoneName, stats]) => ({
@@ -349,6 +497,56 @@ export class AnalyticsService {
         revenue: Number(stats.revenue.toFixed(2)),
       }))
       .sort((a, b) => b.orderCount - a.orderCount);
+
+    // --- DELIVERER PERFORMANCE BREAKDOWN ---
+    const delivererUsers = allUsers.filter(u => u.role === 'DELIVERER');
+    const delivererDeliveriesMap = new Map<number, typeof allDeliveries>();
+
+    for (const d of allDeliveries) {
+      if (d.delivererId) {
+        const list = delivererDeliveriesMap.get(d.delivererId) || [];
+        list.push(d);
+        delivererDeliveriesMap.set(d.delivererId, list);
+      }
+    }
+
+    const delivererPerformance: DelivererPerformanceItem[] = delivererUsers.map(u => {
+      const userDeliveries = delivererDeliveriesMap.get(u.id) || [];
+      const assigned = userDeliveries.length;
+      const completed = userDeliveries.filter(d => d.status === 'DELIVERED').length;
+      const failed = userDeliveries.filter(d => d.status === 'FAILED').length;
+      const active = userDeliveries.filter(d => ['ASSIGNED', 'ACCEPTED', 'PICKUP_READY', 'PICKED_UP', 'OUT_FOR_DELIVERY'].includes(d.status)).length;
+      const compRate = assigned > 0 ? Number(((completed / assigned) * 100).toFixed(1)) : 100;
+
+      // Deliverer-specific average delivery duration
+      let userTotalDuration = 0;
+      let userValidCount = 0;
+      for (const d of userDeliveries.filter(d => d.status === 'DELIVERED')) {
+        if (d.deliveredAt) {
+          const sTime = d.pickedUpAt || d.outForDeliveryAt || d.acceptedAt || d.assignedAt || d.createdAt;
+          if (sTime) {
+            const dur = (new Date(d.deliveredAt).getTime() - new Date(sTime).getTime()) / (1000 * 60);
+            if (dur > 0 && dur < 10080) {
+              userTotalDuration += dur;
+              userValidCount += 1;
+            }
+          }
+        }
+      }
+
+      const avgDur = userValidCount > 0 ? Math.round(userTotalDuration / userValidCount) : null;
+
+      return {
+        delivererId: u.id,
+        delivererEmail: u.email,
+        assignedDeliveries: assigned,
+        completedDeliveries: completed,
+        failedDeliveries: failed,
+        activeDeliveries: active,
+        completionRate: compRate,
+        averageDeliveryMinutes: avgDur,
+      };
+    }).sort((a, b) => b.completedDeliveries - a.completedDeliveries);
 
     // --- PAYMENT PROVIDERS ANALYTICS ---
     const providerMap = new Map<string, { transactionCount: number; volume: number; successCount: number; failedCount: number }>();
@@ -431,11 +629,14 @@ export class AnalyticsService {
       categoryBreakdown,
       deliveryAnalytics: {
         totalDeliveries,
-        deliveredCount: deliveredDeliveries,
+        deliveredCount: deliveredDeliveries.length,
         failedCount: failedDeliveries,
         inTransitCount: inTransitDeliveries,
         fulfillmentRate,
+        averageDeliveryMinutes,
+        averageDeliveryTimeFormatted,
         zones: deliveryZonesData,
+        delivererPerformance,
       },
       paymentAnalytics: {
         totalTransactions: allPayments.length,

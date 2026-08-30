@@ -40,6 +40,7 @@ export async function createOrder(userId: number, items: { variantId: number; qu
 
     let subtotal = 0;
     const itemsToInsert = [];
+    const lowStockAlerts: Array<{ variantName: string; productName: string; remainingStock: number; variantId: number }> = [];
     
     // Lock rows or at least check sequentially
     for (const item of items) {
@@ -73,9 +74,19 @@ export async function createOrder(userId: number, items: { variantId: number; qu
         priceAtPurchase: priceAtPurchase.toString(), // Store as string for precise decimal
       });
       
+      const remainingStock = variant.stock - item.quantity;
+      if (remainingStock <= 10) {
+        lowStockAlerts.push({
+          variantName: `${variant.volume} (${variant.packaging})`,
+          productName: product.name,
+          remainingStock,
+          variantId: variant.id,
+        });
+      }
+
       // Decrement stock (atomic check via where clause)
       await tx.update(variants)
-        .set({ stock: variant.stock - item.quantity })
+        .set({ stock: remainingStock })
         .where(eq(variants.id, variant.id));
     }
     
@@ -146,6 +157,16 @@ export async function createOrder(userId: number, items: { variantId: number; qu
           relatedEntityType: 'ORDER',
           relatedEntityId: order.id,
         });
+
+        for (const alert of lowStockAlerts) {
+          await notificationService.notifyAdmins({
+            type: 'ADMIN_ALERT',
+            title: `Low Stock Alert: ${alert.productName}`,
+            message: `Stock for ${alert.variantName} (${alert.productName}) is running low: ${alert.remainingStock} units remaining.`,
+            relatedEntityType: 'PRODUCT',
+            relatedEntityId: alert.variantId,
+          });
+        }
       } catch (err) {
         console.error('[Notification] Order placement notification error:', err);
       }

@@ -82,6 +82,22 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
 
   useEffect(() => {
     fetchReviews();
+
+    // Authoritative Product View Tracking (Module 21)
+    try {
+      let sessionId = sessionStorage.getItem('mratina_session_id');
+      if (!sessionId) {
+        sessionId = `sess_${Math.random().toString(36).substring(2, 12)}_${Date.now()}`;
+        sessionStorage.setItem('mratina_session_id', sessionId);
+      }
+      fetch(`/api/products/${product.id}/view`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId })
+      }).catch(() => {});
+    } catch {
+      // Non-blocking
+    }
   }, [product.id]);
 
   useEffect(() => {

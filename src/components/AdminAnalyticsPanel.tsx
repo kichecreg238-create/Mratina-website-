@@ -305,7 +305,7 @@ export const AdminAnalyticsPanel: React.FC = () => {
                 <div className="flex items-center space-x-2">
                   <Truck className="w-4 h-4 text-blue-400" />
                   <h3 className="text-xs uppercase tracking-wider font-mono text-white font-semibold">
-                    Delivery Fulfillment & Zones
+                    Delivery Fulfillment & Couriers
                   </h3>
                 </div>
                 <span className="text-[10px] font-mono text-emerald-400 font-bold">
@@ -313,7 +313,7 @@ export const AdminAnalyticsPanel: React.FC = () => {
                 </span>
               </div>
 
-              <div className="grid grid-cols-3 gap-2 text-center font-mono text-xs">
+              <div className="grid grid-cols-4 gap-2 text-center font-mono text-xs">
                 <div className="p-3 bg-white/[0.02] border border-white/5">
                   <div className="text-white/40 text-[10px]">DELIVERED</div>
                   <div className="text-emerald-400 font-bold text-lg">{deliveryAnalytics?.deliveredCount ?? 0}</div>
@@ -326,10 +326,38 @@ export const AdminAnalyticsPanel: React.FC = () => {
                   <div className="text-white/40 text-[10px]">FAILED</div>
                   <div className="text-red-400 font-bold text-lg">{deliveryAnalytics?.failedCount ?? 0}</div>
                 </div>
+                <div className="p-3 bg-white/[0.02] border border-white/5">
+                  <div className="text-white/40 text-[10px]">AVG SPEED</div>
+                  <div className="text-blue-400 font-bold text-sm mt-1">{deliveryAnalytics?.averageDeliveryTimeFormatted || 'N/A'}</div>
+                </div>
               </div>
 
+              {/* Deliverer Performance Matrix */}
+              {deliveryAnalytics?.delivererPerformance && deliveryAnalytics.delivererPerformance.length > 0 && (
+                <div className="space-y-2 pt-2 border-t border-white/5">
+                  <div className="flex justify-between items-center text-[10px] font-mono text-white/40 uppercase">
+                    <span>Deliverer Roster Performance</span>
+                    <span>{deliveryAnalytics.delivererPerformance.length} Couriers</span>
+                  </div>
+                  <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
+                    {deliveryAnalytics.delivererPerformance.map((dp: any) => (
+                      <div key={dp.delivererId} className="p-2.5 bg-white/[0.02] border border-white/5 text-xs font-mono flex flex-col gap-1">
+                        <div className="flex justify-between items-center">
+                          <span className="text-white font-medium">{dp.delivererEmail}</span>
+                          <span className="text-emerald-400 font-bold">{dp.completionRate}% Success</span>
+                        </div>
+                        <div className="flex justify-between text-[10px] text-white/50">
+                          <span>Assigned: {dp.assignedDeliveries} | Completed: {dp.completedDeliveries} | Failed: {dp.failedDeliveries}</span>
+                          <span>Avg: {dp.averageDeliveryMinutes !== null ? `${dp.averageDeliveryMinutes}m` : 'N/A'}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
               {deliveryAnalytics?.zones && deliveryAnalytics.zones.length > 0 && (
-                <div className="space-y-2 pt-2">
+                <div className="space-y-2 pt-2 border-t border-white/5">
                   <div className="text-[10px] font-mono text-white/40 uppercase">Zone Volume</div>
                   {deliveryAnalytics.zones.map((z: any) => (
                     <div key={z.zoneName} className="flex items-center justify-between text-xs font-mono p-2 bg-white/[0.02] border border-white/5">
@@ -412,9 +440,13 @@ export const AdminAnalyticsPanel: React.FC = () => {
                       <tr className="border-b border-white/10 text-white/40 text-[10px] uppercase">
                         <th className="py-2">Product</th>
                         <th className="py-2">Category</th>
+                        <th className="py-2 text-center">Views</th>
+                        <th className="py-2 text-center">Orders</th>
+                        <th className="py-2 text-center">Conversion</th>
+                        <th className="py-2 text-center">Rating</th>
                         <th className="py-2 text-right">Units Sold</th>
-                        <th className="py-2 text-right">Total Revenue</th>
-                        <th className="py-2 text-right">Remaining Stock</th>
+                        <th className="py-2 text-right">Revenue</th>
+                        <th className="py-2 text-right">Stock</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-white/5">
@@ -422,6 +454,28 @@ export const AdminAnalyticsPanel: React.FC = () => {
                         <tr key={p.productId} className="hover:bg-white/[0.02]">
                           <td className="py-2.5 font-medium text-white">{p.productName}</td>
                           <td className="py-2.5 text-white/50 text-[10px]">{p.category}</td>
+                          <td className="py-2.5 text-center text-white/70">{p.views ?? 0}</td>
+                          <td className="py-2.5 text-center text-white/70">{p.distinctOrdersCount ?? 0}</td>
+                          <td className="py-2.5 text-center">
+                            <span className={`px-1.5 py-0.5 text-[10px] font-bold ${
+                              (p.conversionRate ?? 0) >= 20
+                                ? 'text-emerald-400 bg-emerald-950/30'
+                                : (p.conversionRate ?? 0) > 0
+                                ? 'text-amber-400 bg-amber-950/30'
+                                : 'text-white/40'
+                            }`}>
+                              {p.conversionRate ?? 0}%
+                            </span>
+                          </td>
+                          <td className="py-2.5 text-center text-[10px]">
+                            {p.averageRating !== null ? (
+                              <span className="text-amber-400 font-bold">
+                                ★ {p.averageRating} <span className="text-white/40 font-normal">({p.approvedReviewCount})</span>
+                              </span>
+                            ) : (
+                              <span className="text-white/30">&mdash;</span>
+                            )}
+                          </td>
                           <td className="py-2.5 text-right text-blue-400 font-bold">{p.unitsSold}</td>
                           <td className="py-2.5 text-right text-[#c5a059] font-bold">
                             KES {Number(p.revenue).toLocaleString()}

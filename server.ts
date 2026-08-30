@@ -1242,6 +1242,7 @@ async function startServer() {
         }
         
         const finalDelivererId = delivererId ? parseInt(delivererId) : null;
+        const previousDelivererId = delivery?.delivererId || null;
         
         if (!delivery) {
            const [newDel] = await db.insert(deliveries).values({
@@ -1272,10 +1273,56 @@ async function startServer() {
           actorId: user.id,
           actorRole: 'ADMIN',
           action: 'ASSIGNED',
-          fromState: delivery.delivererId ? `Deliverer #${delivery.delivererId}` : 'Unassigned',
+          fromState: previousDelivererId ? `Deliverer #${previousDelivererId}` : 'Unassigned',
           toState: finalDelivererId ? `Deliverer #${finalDelivererId}` : 'Unassigned',
           reason: finalDelivererId ? `Assigned to deliverer #${finalDelivererId}` : 'Unassigned deliverer',
           metadata: { delivererId: finalDelivererId }
+        });
+
+        // Trigger deliverer assignment notifications safely (non-blocking)
+        Promise.resolve().then(async () => {
+          try {
+            const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+            const ord = orderRes[0];
+
+            if (finalDelivererId) {
+              // Notify assigned deliverer
+              await notificationService.createNotification({
+                userId: finalDelivererId,
+                type: 'DELIVERY_UPDATE',
+                title: `New Delivery Assignment: Order #${orderId}`,
+                message: `You have been assigned to fulfill delivery for Order #${orderId}${ord ? ` in ${ord.deliveryZone || 'Standard Zone'}` : ''}.`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+
+              // Notify customer
+              if (ord) {
+                await notificationService.createNotification({
+                  userId: ord.userId,
+                  type: 'DELIVERY_UPDATE',
+                  title: `Deliverer Assigned: Order #${orderId}`,
+                  message: `A courier has been assigned to your order #${orderId} and is preparing for pickup/dispatch.`,
+                  relatedEntityType: 'ORDER',
+                  relatedEntityId: orderId,
+                });
+              }
+            }
+
+            // Notify previous deliverer if reassigned
+            if (previousDelivererId && previousDelivererId !== finalDelivererId) {
+              await notificationService.createNotification({
+                userId: previousDelivererId,
+                type: 'DELIVERY_UPDATE',
+                title: `Assignment Updated: Order #${orderId}`,
+                message: `Order #${orderId} has been reassigned to another courier.`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            }
+          } catch (err) {
+            console.error('[Notification] Deliverer assignment notification error:', err);
+          }
         });
       }
 
@@ -1357,6 +1404,63 @@ async function startServer() {
           toState: status,
           reason: failureReason || null,
           metadata: { deliveryId: delivery.id, delivererId: delivery.delivererId }
+        });
+
+        // Trigger delivery status notification safely (non-blocking)
+        Promise.resolve().then(async () => {
+          try {
+            const orderRes = await db.select().from(orders).where(eq(orders.id, orderId));
+            const ord = orderRes[0];
+            if (!ord) return;
+
+            if (status === 'ACCEPTED') {
+              await notificationService.createNotification({
+                userId: ord.userId,
+                type: 'DELIVERY_UPDATE',
+                title: `Delivery Accepted: Order #${orderId}`,
+                message: `Your courier has accepted the delivery assignment and is heading to the cellar for pickup.`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            } else if (status === 'PICKED_UP' || status === 'OUT_FOR_DELIVERY') {
+              await notificationService.createNotification({
+                userId: ord.userId,
+                type: 'DELIVERY_UPDATE',
+                title: `Out for Delivery: Order #${orderId}`,
+                message: `Your order #${orderId} is on the way with your courier!`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            } else if (status === 'DELIVERED') {
+              await notificationService.createNotification({
+                userId: ord.userId,
+                type: 'DELIVERY_UPDATE',
+                title: `Order #${orderId} Delivered`,
+                message: `Your order #${orderId} has been successfully delivered. Enjoy your Mratina!`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            } else if (status === 'FAILED') {
+              await notificationService.createNotification({
+                userId: ord.userId,
+                type: 'DELIVERY_UPDATE',
+                title: `Delivery Exception: Order #${orderId}`,
+                message: `We encountered an issue delivering your order #${orderId}.${failureReason ? ` Details: ${failureReason}` : ''}`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+
+              await notificationService.notifyAdmins({
+                type: 'ADMIN_ALERT',
+                title: `Delivery Failed: Order #${orderId}`,
+                message: `Courier marked delivery #${delivery.id} (Order #${orderId}) as FAILED.${failureReason ? ` Reason: ${failureReason}` : ''}`,
+                relatedEntityType: 'ORDER',
+                relatedEntityId: orderId,
+              });
+            }
+          } catch (err) {
+            console.error('[Notification] Delivery status update notification error:', err);
+          }
         });
       } else if (status && !delivery) {
          // Fallback for orders without deliveries created yet
@@ -2497,6 +2601,26 @@ async function startServer() {
   // ==========================================
   // MODULE 21: ANALYTICS API ENDPOINTS
   // ==========================================
+
+  // Public / Customer: Record Product View
+  app.post("/api/products/:id/view", async (req, res) => {
+    try {
+      const productId = parseInt(req.params.id);
+      if (isNaN(productId)) return res.status(400).json({ error: "Invalid product ID" });
+
+      const { sessionId, userId } = req.body;
+      const view = await analyticsService.recordProductView({
+        productId,
+        sessionId: sessionId ? String(sessionId) : undefined,
+        userId: userId ? Number(userId) : undefined,
+      });
+
+      res.json({ success: true, recorded: Boolean(view) });
+    } catch (error: any) {
+      console.error("Failed to record product view:", error);
+      res.status(500).json({ error: "Failed to record product view" });
+    }
+  });
 
   // Admin: Comprehensive Authoritative Analytics Aggregation
   app.get("/api/admin/analytics", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
