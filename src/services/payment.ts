@@ -47,7 +47,14 @@ export interface PaymentWebhookVerificationResult {
   isConfigured: boolean;
   orderId?: number;
   status?: PaymentState;
+  checkoutRequestId?: string;
+  merchantRequestId?: string;
   providerReference?: string;
+  receiptNumber?: string;
+  amount?: number;
+  phoneNumber?: string;
+  resultCode?: number | string;
+  resultDesc?: string;
   error?: string;
 }
 
@@ -237,18 +244,21 @@ export class MpesaAdapter implements PaymentProviderAdapter {
         };
       }
 
-      const checkoutRequestId = stkCallback.CheckoutRequestID;
+      const checkoutRequestId = stkCallback.CheckoutRequestID ? String(stkCallback.CheckoutRequestID) : undefined;
+      const merchantRequestId = stkCallback.MerchantRequestID ? String(stkCallback.MerchantRequestID) : undefined;
       const resultCode = stkCallback.ResultCode;
-      const resultDesc = stkCallback.ResultDesc;
+      const resultDesc = stkCallback.ResultDesc ? String(stkCallback.ResultDesc) : undefined;
 
       let receiptNumber: string | undefined = undefined;
       let amount: number | undefined = undefined;
+      let phoneNumber: string | undefined = undefined;
 
       const items = stkCallback.CallbackMetadata?.Item;
       if (Array.isArray(items)) {
         for (const it of items) {
-          if (it.Name === 'MpesaReceiptNumber') receiptNumber = String(it.Value);
-          if (it.Name === 'Amount') amount = Number(it.Value);
+          if (it.Name === 'MpesaReceiptNumber' && it.Value) receiptNumber = String(it.Value);
+          if (it.Name === 'Amount' && it.Value !== undefined) amount = Number(it.Value);
+          if (it.Name === 'PhoneNumber' && it.Value) phoneNumber = String(it.Value);
         }
       }
 
@@ -259,8 +269,15 @@ export class MpesaAdapter implements PaymentProviderAdapter {
         success: true,
         isConfigured: true,
         status: paymentState,
+        checkoutRequestId,
+        merchantRequestId,
+        receiptNumber,
         providerReference: receiptNumber || checkoutRequestId,
-        error: isSuccess ? undefined : resultDesc
+        amount,
+        phoneNumber,
+        resultCode,
+        resultDesc,
+        error: isSuccess ? undefined : (resultDesc || `M-Pesa transaction failed with code ${resultCode}`)
       };
     } catch (err: any) {
       return {

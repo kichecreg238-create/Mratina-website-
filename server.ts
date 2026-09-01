@@ -1690,10 +1690,20 @@ async function startServer() {
       
       if (!result.isConfigured) {
          // Because it's unconfigured, we shouldn't leave the order permanently PENDING if they can't pay.
-         // In a real app, maybe we fail it immediately, or allow retrying with another provider.
-         // Let's set it back to INITIATED so they can try again or use the dev simulation.
          await db.update(orders).set({ paymentState: 'INITIATED', updatedAt: new Date() }).where(eq(orders.id, order.id));
          await db.update(payments).set({ status: 'FAILED' }).where(eq(payments.id, payment.id));
+      } else if (result.success && result.providerReference) {
+         // Store CheckoutRequestID on the payment record for webhook correlation
+         await db.update(payments).set({ 
+           status: 'PENDING',
+           providerReference: result.providerReference 
+         }).where(eq(payments.id, payment.id));
+      } else if (!result.success) {
+         await db.update(orders).set({ paymentState: 'INITIATED', updatedAt: new Date() }).where(eq(orders.id, order.id));
+         await db.update(payments).set({ 
+           status: 'FAILED',
+           providerReference: result.providerReference || null 
+         }).where(eq(payments.id, payment.id));
       }
       
       res.json(result);
@@ -1713,23 +1723,52 @@ async function startServer() {
          return res.status(400).json({ error: "Invalid provider" });
        }
 
-       // SECURITY BOUNDARY: Provider signature verification MUST happen here.
-       // We DO NOT trust req.body.status directly from the client.
+       // SECURITY BOUNDARY: Provider signature & payload verification
        const verification = await paymentService.verifyWebhook(provider, req.body, req.headers);
        
        if (!verification.isConfigured) {
           return res.status(501).json({ error: "Provider unconfigured. Cannot process real webhooks." });
        }
        
-       if (!verification.success || !verification.orderId || !verification.status) {
+       if (!verification.success || !verification.status) {
           return res.status(400).json({ error: verification.error || "Invalid webhook payload or signature" });
        }
        
-       const orderRes = await db.select().from(orders).where(eq(orders.id, verification.orderId));
+       // 1. Resolve payment & order from CheckoutRequestID, providerReference, or orderId
+       let paymentRecord: any = null;
+       let targetOrderId = verification.orderId;
+
+       if (verification.checkoutRequestId) {
+         const matchedPayments = await db.select().from(payments)
+           .where(eq(payments.providerReference, verification.checkoutRequestId))
+           .orderBy(desc(payments.createdAt));
+         if (matchedPayments.length > 0) {
+           paymentRecord = matchedPayments[0];
+           targetOrderId = paymentRecord.orderId;
+         }
+       }
+
+       // Fallback: If not found by checkoutRequestId, check by providerReference
+       if (!targetOrderId && verification.providerReference) {
+         const matchedPayments = await db.select().from(payments)
+           .where(eq(payments.providerReference, verification.providerReference))
+           .orderBy(desc(payments.createdAt));
+         if (matchedPayments.length > 0) {
+           paymentRecord = matchedPayments[0];
+           targetOrderId = paymentRecord.orderId;
+         }
+       }
+
+       if (!targetOrderId) {
+         console.error(`[M-Pesa Webhook] Could not correlate callback with CheckoutRequestID: ${verification.checkoutRequestId || verification.providerReference}`);
+         return res.status(404).json({ error: "Could not correlate webhook to an active order" });
+       }
+       
+       const orderRes = await db.select().from(orders).where(eq(orders.id, targetOrderId));
        const order = orderRes[0];
        
        if (!order) {
-         return res.status(404).json({ error: "Order not found" });
+         return res.status(404).json({ error: `Order #${targetOrderId} not found` });
        }
        
        // Idempotency: if already in the target state, acknowledge and do nothing
@@ -1739,31 +1778,42 @@ async function startServer() {
        
        // Enforce Payment State Machine
        if (!isValidPaymentTransition(order.paymentState as any, verification.status)) {
-          return res.status(400).json({ error: "Invalid payment state transition" });
+          if (order.paymentState === 'SUCCESS') {
+            return res.json({ received: true, note: "Order already marked SUCCESS" });
+          }
+          return res.status(400).json({ error: `Invalid payment state transition from ${order.paymentState} to ${verification.status}` });
        }
        
-       // Update the most recent pending payment attempt
-       const pendingPayments = await db.select().from(payments)
-         .where(and(eq(payments.orderId, order.id), eq(payments.provider, provider)))
-         .orderBy(desc(payments.createdAt));
-         
-       if (pendingPayments.length > 0) {
-          const payment = pendingPayments[0];
+       // Update the matched payment attempt
+       if (paymentRecord) {
           await db.update(payments)
             .set({ 
               status: verification.status, 
-              providerReference: verification.providerReference || payment.providerReference 
+              providerReference: verification.receiptNumber || verification.checkoutRequestId || paymentRecord.providerReference 
             })
-            .where(eq(payments.id, payment.id));
+            .where(eq(payments.id, paymentRecord.id));
        } else {
-          // If no pending record (e.g. manual offline payment), record it
-          await db.insert(payments).values({
-             orderId: order.id,
-             provider,
-             amount: order.totalAmount,
-             status: verification.status,
-             providerReference: verification.providerReference
-          });
+          const pendingPayments = await db.select().from(payments)
+            .where(and(eq(payments.orderId, order.id), eq(payments.provider, provider)))
+            .orderBy(desc(payments.createdAt));
+            
+          if (pendingPayments.length > 0) {
+             const payment = pendingPayments[0];
+             await db.update(payments)
+               .set({ 
+                 status: verification.status, 
+                 providerReference: verification.receiptNumber || verification.checkoutRequestId || payment.providerReference 
+               })
+               .where(eq(payments.id, payment.id));
+          } else {
+             await db.insert(payments).values({
+                orderId: order.id,
+                provider,
+                amount: verification.amount ? verification.amount.toString() : order.totalAmount,
+                status: verification.status,
+                providerReference: verification.receiptNumber || verification.checkoutRequestId
+             });
+          }
        }
 
        // Update authoritative order state
@@ -1779,11 +1829,16 @@ async function startServer() {
          action: 'PAYMENT_STATE_CHANGE',
          fromState: order.paymentState,
          toState: verification.status,
-         reason: `Provider webhook notification: ${provider} -> ${verification.status}`,
+         reason: verification.error 
+           ? `Provider callback ${provider}: ${verification.error}` 
+           : `Provider webhook notification: ${provider} -> ${verification.status}`,
          metadata: {
            provider,
-           providerReference: verification.providerReference,
-           amount: order.totalAmount
+           checkoutRequestId: verification.checkoutRequestId,
+           receiptNumber: verification.receiptNumber,
+           amount: verification.amount || order.totalAmount,
+           resultCode: verification.resultCode,
+           resultDesc: verification.resultDesc
          }
        });
 
@@ -1800,8 +1855,52 @@ async function startServer() {
            action: 'STATUS_CHANGE',
            fromState: 'PENDING',
            toState: 'CONFIRMED',
-           reason: 'Auto-confirmed upon verified payment receipt',
-           metadata: { trigger: 'WEBHOOK_PAYMENT_SUCCESS' }
+           reason: 'Auto-confirmed upon verified M-Pesa payment receipt',
+           metadata: { 
+             trigger: 'WEBHOOK_PAYMENT_SUCCESS',
+             receiptNumber: verification.receiptNumber,
+             checkoutRequestId: verification.checkoutRequestId
+           }
+         });
+
+         // Dispatch customer and admin notifications
+         Promise.resolve().then(async () => {
+           try {
+             await notificationService.createNotification({
+               userId: order.userId,
+               type: 'ORDER_STATUS',
+               title: `Payment Verified: Order #${order.id}`,
+               message: `Your payment of KES ${Number(order.totalAmount).toLocaleString()} was received via M-Pesa (Receipt: ${verification.receiptNumber || 'Verified'}). Your order is now CONFIRMED.`,
+               relatedEntityType: 'ORDER',
+               relatedEntityId: order.id,
+             });
+
+             await notificationService.notifyAdmins({
+               type: 'ADMIN_ALERT',
+               title: `Payment Confirmed: Order #${order.id}`,
+               message: `Order #${order.id} paid KES ${Number(order.totalAmount).toLocaleString()} via M-Pesa (Receipt: ${verification.receiptNumber || verification.checkoutRequestId}).`,
+               relatedEntityType: 'ORDER',
+               relatedEntityId: order.id,
+             });
+           } catch (notifyErr) {
+             console.error('[Notification] Webhook notification error:', notifyErr);
+           }
+         });
+       } else if (verification.status === 'FAILED') {
+         // Notify customer of payment failure / cancellation
+         Promise.resolve().then(async () => {
+           try {
+             await notificationService.createNotification({
+               userId: order.userId,
+               type: 'ORDER_STATUS',
+               title: `Payment Incomplete: Order #${order.id}`,
+               message: `M-Pesa payment prompt was not completed: ${verification.resultDesc || 'Cancelled or timed out'}. You can retry payment anytime in Order History.`,
+               relatedEntityType: 'ORDER',
+               relatedEntityId: order.id,
+             });
+           } catch (notifyErr) {
+             console.error('[Notification] Webhook failure notification error:', notifyErr);
+           }
          });
        }
          
