@@ -143,14 +143,42 @@ export function AdminMpesaConfigPanel() {
     loadAuditLogs();
   }, [user]);
 
-  const handleUnlockGate = () => {
+  const handleUnlockGate = async () => {
+    if (!user) {
+      setStatusMessage({ type: 'error', text: 'You must be signed in as an administrator to unlock payment settings.' });
+      return;
+    }
     setSecurityConfirming(true);
-    setTimeout(() => {
+    setStatusMessage(null);
+
+    try {
+      // Force fresh token refresh from Firebase Auth
+      const freshToken = await user.getIdToken(true);
+      
+      // Perform server-side gate authorization
+      const res = await fetch('/api/admin/payments/mpesa-config/unlock', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${freshToken}`,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || 'Server authorization failed. Ensure you have the ADMIN role.');
+      }
+
       setIsUnlocked(true);
       setUnlockTime(Date.now());
+      setStatusMessage({ type: 'success', text: data.message || 'Admin authorization confirmed. Credentials access unlocked.' });
+      await loadAuditLogs();
+    } catch (err: any) {
+      console.error('Security gate unlock error:', err);
+      setStatusMessage({ type: 'error', text: `Authentication failed: ${err.message || 'Unauthorized access'}` });
+    } finally {
       setSecurityConfirming(false);
-      setStatusMessage({ type: 'success', text: 'Admin security gate confirmed. Credentials access unlocked.' });
-    }, 400);
+    }
   };
 
   const handleLockGate = () => {
@@ -677,11 +705,15 @@ export function AdminMpesaConfigPanel() {
                           {log.actorEmail || 'Admin'}
                         </td>
                         <td className="p-3">
-                          <span className={`px-2 py-0.5 text-[9px] border ${
+                          <span className={`px-2 py-0.5 text-[9px] font-mono border ${
                             log.action === 'M_PESA_CONFIGURATION_CREATED'
                               ? 'bg-blue-950/40 text-blue-300 border-blue-500/30'
                               : log.action === 'M_PESA_CONFIGURATION_UPDATED'
                               ? 'bg-emerald-950/40 text-emerald-300 border-emerald-500/30'
+                              : log.action === 'M_PESA_CONFIGURATION_TESTED'
+                              ? 'bg-purple-950/40 text-purple-300 border-purple-500/30'
+                              : log.action === 'M_PESA_GATE_UNLOCKED'
+                              ? 'bg-[#c5a059]/10 text-[#c5a059] border-[#c5a059]/30'
                               : 'bg-white/5 text-white/70 border-white/10'
                           }`}>
                             {log.action}

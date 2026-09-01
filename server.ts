@@ -1918,6 +1918,26 @@ async function startServer() {
   // ADMIN M-PESA RUNTIME PAYMENT CONFIGURATION (FOR SECURE CLIENT HANDOVER)
   // =========================================================================
 
+  // Admin: Security Gate Unlock Verification (Enforces server-side authentication & authorization)
+  app.post("/api/admin/payments/mpesa-config/unlock", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      await paymentConfigService.recordGateUnlock(user.id, user.role);
+
+      res.json({
+        success: true,
+        authorizedAt: Date.now(),
+        adminEmail: user.email,
+        message: "Admin credentials verified. Gateway settings access authorized."
+      });
+    } catch (error: any) {
+      console.error("[PaymentConfig] Gate unlock verification failed:", error);
+      res.status(500).json({ error: "Security gate verification failed" });
+    }
+  });
+
   // Admin: Get public/masked M-Pesa configuration metadata (NEVER returns raw secrets)
   app.get("/api/admin/payments/mpesa-config", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
     try {
@@ -1937,16 +1957,28 @@ async function startServer() {
 
       const { consumerKey, consumerSecret, passkey, shortcode, callbackUrl, environment } = req.body;
 
-      // Validate inputs
+      // Validate environment
       if (environment && !['SANDBOX', 'PRODUCTION'].includes(environment)) {
         return res.status(400).json({ error: "Invalid environment specified. Must be SANDBOX or PRODUCTION." });
       }
 
-      if (callbackUrl && callbackUrl.trim()) {
+      // Validate shortcode
+      if (shortcode !== undefined && shortcode !== null) {
+        const cleanShort = String(shortcode).trim();
+        if (cleanShort.length > 0 && !/^[0-9A-Za-z_-]{4,15}$/.test(cleanShort)) {
+          return res.status(400).json({ error: "Invalid shortcode format. Must be a valid Safaricom shortcode / Till number." });
+        }
+      }
+
+      // Validate Callback URL
+      if (callbackUrl && String(callbackUrl).trim()) {
         try {
-          const parsed = new URL(callbackUrl.trim());
+          const parsed = new URL(String(callbackUrl).trim());
           if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-            return res.status(400).json({ error: "Callback URL must be a valid HTTP/HTTPS URL." });
+            return res.status(400).json({ error: "Callback URL must be a valid HTTP or HTTPS URL." });
+          }
+          if (environment === 'PRODUCTION' && parsed.protocol !== 'https:') {
+            return res.status(400).json({ error: "Production callback URL must use HTTPS for secure webhook delivery." });
           }
         } catch {
           return res.status(400).json({ error: "Invalid Callback URL format." });

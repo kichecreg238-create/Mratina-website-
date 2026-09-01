@@ -43,12 +43,16 @@ export interface SaveMpesaConfigInput {
 export class PaymentConfigService {
   private initialized = false;
 
-  private maskSecret(val: string | null | undefined): string | null {
+  private maskSecret(val: string | null | undefined, isKey = false): string | null {
     if (!val || typeof val !== 'string' || val.trim() === '') return null;
     const clean = val.trim();
-    if (clean.length <= 4) return '••••••••';
-    const lastChars = clean.slice(-4);
-    return `••••••••••••••${lastChars}`;
+    if (isKey) {
+      if (clean.length <= 4) return '••••••••';
+      const lastChars = clean.slice(-4);
+      return `••••••••••••${lastChars}`;
+    }
+    // High-security secrets (consumerSecret, passkey) NEVER expose trailing characters
+    return '••••••••••••••••';
   }
 
   public async ensureTablesExist() {
@@ -119,9 +123,9 @@ export class PaymentConfigService {
           environment: (dbConfig.environment as 'SANDBOX' | 'PRODUCTION') || 'SANDBOX',
           shortcode: dbConfig.shortcode || '',
           callbackUrl: dbConfig.callbackUrl || (process.env.APP_URL ? `${process.env.APP_URL}/api/webhooks/payment/M-PESA` : '/api/webhooks/payment/M-PESA'),
-          consumerKeyMasked: this.maskSecret(dbConfig.consumerKey),
-          consumerSecretMasked: this.maskSecret(dbConfig.consumerSecret),
-          passkeyMasked: this.maskSecret(dbConfig.passkey),
+          consumerKeyMasked: this.maskSecret(dbConfig.consumerKey, true),
+          consumerSecretMasked: this.maskSecret(dbConfig.consumerSecret, false),
+          passkeyMasked: this.maskSecret(dbConfig.passkey, false),
           hasConsumerKey: hasKey,
           hasConsumerSecret: hasSecret,
           hasPasskey: hasPass,
@@ -152,9 +156,9 @@ export class PaymentConfigService {
       environment: 'SANDBOX',
       shortcode: envShortcode || '',
       callbackUrl: envCallback,
-      consumerKeyMasked: this.maskSecret(envKey),
-      consumerSecretMasked: this.maskSecret(envSecret),
-      passkeyMasked: this.maskSecret(envPass),
+      consumerKeyMasked: this.maskSecret(envKey, true),
+      consumerSecretMasked: this.maskSecret(envSecret, false),
+      passkeyMasked: this.maskSecret(envPass, false),
       hasConsumerKey: hasKey,
       hasConsumerSecret: hasSecret,
       hasPasskey: Boolean(envPass && envPass.trim()),
@@ -230,12 +234,12 @@ export class PaymentConfigService {
 
     // Helper to determine whether a secret is updated or preserved
     const resolveSecret = (incoming: string | undefined, currentStored: string | null | undefined, fieldName: string): string | null => {
-      if (incoming === undefined) {
+      if (incoming === undefined || incoming === null) {
         return currentStored || null;
       }
       const trimmed = incoming.trim();
-      // If client sent empty string or bullet placeholder (masked text), retain current stored
-      if (trimmed === '' || trimmed.startsWith('••••')) {
+      // If client sent empty string, bullet characters (masked text), or asterisk placeholders, retain current stored
+      if (trimmed === '' || trimmed.includes('•') || trimmed.startsWith('***') || trimmed.startsWith('••••')) {
         return currentStored || null;
       }
       fieldsModified.push(fieldName);
@@ -247,18 +251,18 @@ export class PaymentConfigService {
     const finalPasskey = resolveSecret(input.passkey, existing?.passkey, 'passkey');
 
     let finalShortcode = existing?.shortcode || null;
-    if (input.shortcode !== undefined) {
+    if (input.shortcode !== undefined && input.shortcode !== null) {
       const cleanShort = input.shortcode.trim();
-      if (cleanShort !== (existing?.shortcode || '')) {
+      if (cleanShort !== '' && cleanShort !== (existing?.shortcode || '')) {
         finalShortcode = cleanShort;
         fieldsModified.push('shortcode');
       }
     }
 
     let finalCallbackUrl = existing?.callbackUrl || null;
-    if (input.callbackUrl !== undefined) {
+    if (input.callbackUrl !== undefined && input.callbackUrl !== null) {
       const cleanUrl = input.callbackUrl.trim();
-      if (cleanUrl !== (existing?.callbackUrl || '')) {
+      if (cleanUrl !== '' && cleanUrl !== (existing?.callbackUrl || '')) {
         finalCallbackUrl = cleanUrl;
         fieldsModified.push('callbackUrl');
       }
@@ -320,6 +324,25 @@ export class PaymentConfigService {
   }
 
   /**
+   * Record security gate unlock by authenticated admin
+   */
+  async recordGateUnlock(actorId: number, actorRole: string) {
+    await this.ensureTablesExist();
+    try {
+      await db.insert(paymentConfigAuditLogs).values({
+        provider: 'M-PESA',
+        actorId,
+        actorRole: actorRole || 'ADMIN',
+        action: 'M_PESA_GATE_UNLOCKED',
+        fieldsModified: [],
+        details: `Admin #${actorId} authenticated and unlocked M-Pesa runtime payment credentials panel.`
+      });
+    } catch (e) {
+      console.warn('[PaymentConfig] Could not record gate unlock log:', e);
+    }
+  }
+
+  /**
    * Diagnostic Test for Safaricom Daraja Authentication
    */
   async testMpesaConnectivity(actorId: number, actorRole: string, overrideParams?: { consumerKey?: string; consumerSecret?: string; environment?: 'SANDBOX' | 'PRODUCTION' }) {
@@ -327,11 +350,13 @@ export class PaymentConfigService {
 
     const authSecrets = await this.getAuthoritativeMpesaSecrets();
 
-    const consumerKey = (overrideParams?.consumerKey && !overrideParams.consumerKey.startsWith('••••'))
+    const isMaskedOrEmpty = (v: string | undefined | null) => !v || v.trim() === '' || v.includes('•') || v.startsWith('***');
+
+    const consumerKey = (overrideParams?.consumerKey && !isMaskedOrEmpty(overrideParams.consumerKey))
       ? overrideParams.consumerKey.trim()
       : authSecrets.consumerKey;
 
-    const consumerSecret = (overrideParams?.consumerSecret && !overrideParams.consumerSecret.startsWith('••••'))
+    const consumerSecret = (overrideParams?.consumerSecret && !isMaskedOrEmpty(overrideParams.consumerSecret))
       ? overrideParams.consumerSecret.trim()
       : authSecrets.consumerSecret;
 
@@ -365,7 +390,7 @@ export class PaymentConfigService {
       const data: any = await response.json().catch(() => ({}));
 
       if (response.ok && data.access_token) {
-        // Record test audit log
+        // Record test audit log (NEVER store access_token in logs)
         await db.insert(paymentConfigAuditLogs).values({
           provider: 'M-PESA',
           actorId,
