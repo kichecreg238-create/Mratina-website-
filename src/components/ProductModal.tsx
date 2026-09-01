@@ -212,37 +212,56 @@ export const ProductModal = ({ product, onClose }: { product: any, onClose: () =
           </p>
 
           <div className="space-y-3 mb-6">
-            <h3 className="text-[10px] uppercase tracking-widest text-white/40">Select Variant</h3>
+            <h3 className="text-[10px] uppercase tracking-widest text-white/50 font-mono">Select Vintage / Variant</h3>
             <div className="flex flex-col gap-2.5">
-              {product.variants?.map((variant: any) => (
-                <button
-                  key={variant.id}
-                  onClick={() => setSelectedVariant(variant)}
-                  className={`flex justify-between items-center p-3.5 border transition-colors ${
-                    selectedVariant?.id === variant.id 
-                      ? 'border-[#c5a059] bg-[#c5a059]/5' 
-                      : 'border-white/10 hover:border-white/30'
-                  }`}
-                >
-                  <div className="text-left">
-                    <span className="block text-sm text-white mb-0.5">{variant.volume}</span>
-                    <span className="block text-[10px] text-white/50 uppercase tracking-widest">{variant.packaging}</span>
-                  </div>
-                  <div className="text-right">
-                    <span className="block text-sm text-[#c5a059] font-mono">KES {Number(variant.price).toLocaleString()}</span>
-                  </div>
-                </button>
-              ))}
+              {product.variants?.map((variant: any) => {
+                const isSelected = selectedVariant?.id === variant.id;
+                const stock = Number(variant.stock || 0);
+                return (
+                  <button
+                    key={variant.id}
+                    onClick={() => setSelectedVariant(variant)}
+                    className={`flex justify-between items-center p-3.5 border transition-all text-left ${
+                      isSelected 
+                        ? 'border-[#c5a059] bg-[#c5a059]/10 shadow-[0_0_15px_rgba(197,160,89,0.1)]' 
+                        : 'border-white/10 hover:border-white/25 bg-white/[0.02]'
+                    }`}
+                  >
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-medium text-white">{variant.volume}</span>
+                        {stock <= 0 ? (
+                          <span className="text-[9px] font-mono text-red-400 bg-red-950/40 px-1.5 py-0.5 border border-red-500/30">
+                            Sold Out
+                          </span>
+                        ) : stock <= 5 ? (
+                          <span className="text-[9px] font-mono text-amber-400 bg-amber-950/40 px-1.5 py-0.5 border border-amber-500/30">
+                            Only {stock} left
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-mono text-[#00ff88]/80 bg-[#00ff88]/10 px-1.5 py-0.5 border border-[#00ff88]/20">
+                            In Cellar
+                          </span>
+                        )}
+                      </div>
+                      <span className="block text-[10px] text-white/50 uppercase tracking-widest font-mono mt-0.5">{variant.packaging}</span>
+                    </div>
+                    <div className="text-right">
+                      <span className="block text-sm text-[#c5a059] font-mono font-medium">KES {Number(variant.price).toLocaleString()}</span>
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           <button
             onClick={handleAddToCart}
             disabled={!selectedVariant || selectedVariant.stock <= 0}
-            className="w-full py-4 bg-[#c5a059] text-black uppercase tracking-[0.2em] text-[10px] font-bold hover:bg-[#d4b271] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-auto"
+            className="w-full py-4 bg-[#c5a059] text-black uppercase tracking-[0.2em] text-[10px] font-bold hover:bg-[#d4b271] transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center gap-2 mt-auto shadow-lg"
           >
             <ShoppingBag size={14} />
-            {selectedVariant?.stock > 0 ? 'Add to Reserve' : 'Out of Stock'}
+            {!selectedVariant ? 'Select Variant' : selectedVariant.stock > 0 ? 'Add to Reserve' : 'Out of Stock'}
           </button>
         </div>
 

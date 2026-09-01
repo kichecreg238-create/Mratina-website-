@@ -242,27 +242,29 @@ export const Home = () => {
       {/* The Collection */}
       {products.length > 1 && (
         <section className="mt-16 md:mt-24 mb-12">
-          <h2 className="text-xs uppercase tracking-[0.4em] text-[#c5a059] mb-8 border-b border-white/5 pb-4">The Collection</h2>
+          <h2 className="text-xs uppercase tracking-[0.4em] text-[#c5a059] mb-8 border-b border-white/5 pb-4 font-mono font-bold">The Collection</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
             {products.slice(1).map(p => {
               const variant = p.variants?.[0];
               if (!variant) return null;
               return (
-                <div key={p.id} className="group border border-white/10 bg-white/5 hover:bg-white/10 transition-colors p-6 flex flex-col cursor-pointer" onClick={() => setSelectedProduct(p)}>
+                <div 
+                  key={p.id} 
+                  className="group border border-white/10 bg-gradient-to-b from-white/[0.03] to-transparent hover:border-[#c5a059]/40 hover:bg-[#c5a059]/[0.02] transition-all p-6 flex flex-col cursor-pointer relative shadow-lg"
+                  onClick={() => setSelectedProduct(p)}
+                >
                   <div className="h-48 flex items-center justify-center mb-6 pointer-events-none">
-                    <div className="w-16 h-32 bg-[#222] border border-white/10 shadow-[0_10px_30px_rgba(0,0,0,0.5)] flex items-center justify-center">
-                       <span className="text-[6px] tracking-widest text-[#c5a059] -rotate-90 block">MRATINA</span>
+                    <div className="w-16 h-32 bg-gradient-to-b from-[#252525] to-[#111] border border-white/10 group-hover:border-[#c5a059]/40 shadow-[0_10px_30px_rgba(0,0,0,0.6)] flex items-center justify-center transition-all group-hover:scale-105">
+                       <span className="text-[7px] tracking-[0.25em] text-[#c5a059] -rotate-90 block font-mono font-bold">MRATINA</span>
                     </div>
                   </div>
                   <h3 className="text-xl font-serif text-white mb-2 group-hover:text-[#c5a059] transition-colors">{p.name}</h3>
-                  <p className="text-[11px] text-white/50 uppercase tracking-wider mb-6 flex-1 pointer-events-none">{variant.volume} • {p.abv}</p>
+                  <p className="text-[11px] text-white/50 uppercase tracking-widest mb-6 flex-1 pointer-events-none font-mono">{variant.volume} • {p.abv}</p>
                   <div className="flex justify-between items-center border-t border-white/5 pt-4">
-                    <span className="text-sm text-[#c5a059]">KES {Number(variant.price).toLocaleString()}</span>
-                    <button 
-                      className="text-[9px] uppercase tracking-[0.2em] text-white/70 hover:text-white transition-colors"
-                    >
-                      View
-                    </button>
+                    <span className="text-sm font-mono text-[#c5a059] font-medium">KES {Number(variant.price).toLocaleString()}</span>
+                    <span className="text-[9px] uppercase tracking-[0.2em] font-mono text-white/60 group-hover:text-white transition-colors flex items-center gap-1">
+                      Reserve Details →
+                    </span>
                   </div>
                 </div>
               );

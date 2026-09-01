@@ -164,10 +164,18 @@ export const OrderHistory = () => {
       </div>
       
       {orders.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-24 text-center opacity-50 bg-[#111] border border-white/5 p-12">
-          <Package size={48} className="mb-4 text-[#c5a059]" />
-          <p className="text-sm font-serif mb-1 text-white/80">No orders found in your history.</p>
-          <p className="text-xs text-white/40">Purchases will appear here once initiated.</p>
+        <div className="flex flex-col items-center justify-center py-20 text-center bg-[#111]/80 border border-white/5 p-12">
+          <div className="w-16 h-16 rounded-full bg-[#c5a059]/10 border border-[#c5a059]/30 flex items-center justify-center mb-4">
+            <Package size={30} className="text-[#c5a059]" />
+          </div>
+          <h3 className="text-base font-serif text-white mb-1">No Orders Found in Your History</h3>
+          <p className="text-xs text-white/50 max-w-sm mb-6 font-serif">Your cellar reservations, delivery milestones, and tasting notes will appear here once an order is placed.</p>
+          <a
+            href="/"
+            className="px-6 py-2.5 bg-[#c5a059] text-black text-xs font-mono uppercase font-bold tracking-widest hover:bg-[#d4b271] transition-colors"
+          >
+            Explore Collection
+          </a>
         </div>
       ) : (
         <div className="space-y-6">
@@ -175,36 +183,61 @@ export const OrderHistory = () => {
             const canCancel = ['PENDING', 'CONFIRMED'].includes(order.status) && 
               (!order.delivery || !['PICKED_UP', 'OUT_FOR_DELIVERY', 'DELIVERED'].includes(order.delivery.status));
 
+            // Determine tracking progress step
+            let stepIndex = 0;
+            if (['CONFIRMED', 'PROCESSING'].includes(order.status)) stepIndex = 1;
+            if (['PICKUP_READY', 'OUT_FOR_DELIVERY'].includes(order.status) || order.delivery?.status === 'OUT_FOR_DELIVERY') stepIndex = 2;
+            if (order.status === 'DELIVERED') stepIndex = 3;
+            if (['CANCELLED', 'FAILED'].includes(order.status)) stepIndex = -1;
+
             return (
-              <div key={order.id} className="bg-[#111] border border-white/10 p-6 transition-all hover:border-white/20">
+              <div key={order.id} className="bg-gradient-to-b from-[#141414] to-[#0c0c0c] border border-white/10 p-6 transition-all hover:border-[#c5a059]/30 shadow-lg">
                 <div className="flex flex-wrap justify-between items-start gap-4 mb-6 border-b border-white/5 pb-4">
                   <div>
                     <div className="flex items-center gap-3 mb-1">
-                      <span className="text-base font-serif text-white">Order #{order.id}</span>
+                      <span className="text-base font-serif text-white font-medium">Order #{order.id}</span>
                       {getOrderStatusBadge(order.status)}
                     </div>
-                    <span className="text-xs text-white/40">{new Date(order.createdAt).toLocaleString()}</span>
+                    <span className="text-xs text-white/40 font-mono">{new Date(order.createdAt).toLocaleString()}</span>
                   </div>
                   <div className="text-right">
-                    <span className="text-base font-serif text-[#c5a059] block mb-1">KES {Number(order.totalAmount).toLocaleString()}</span>
-                    <div className="flex items-center justify-end gap-2 text-[10px] text-white/60">
-                      <span>Payment:</span>
+                    <span className="text-base font-serif text-[#c5a059] font-medium block mb-1">KES {Number(order.totalAmount).toLocaleString()}</span>
+                    <div className="flex items-center justify-end gap-2 text-[10px] font-mono text-white/60">
+                      <span className="uppercase text-white/40">Payment:</span>
                       {getPaymentBadge(order.paymentState)}
                     </div>
                   </div>
                 </div>
 
+                {/* Visual Order Lifecycle Stepper (for non-cancelled orders) */}
+                {stepIndex >= 0 && (
+                  <div className="mb-6 bg-black/40 p-4 border border-white/5">
+                    <div className="grid grid-cols-4 gap-2 text-center text-[10px] font-mono uppercase tracking-wider mb-2">
+                      <span className={stepIndex >= 0 ? "text-[#c5a059] font-bold" : "text-white/30"}>1. Placed</span>
+                      <span className={stepIndex >= 1 ? "text-[#c5a059] font-bold" : "text-white/30"}>2. Cellar Prep</span>
+                      <span className={stepIndex >= 2 ? "text-[#c5a059] font-bold" : "text-white/30"}>3. Dispatched</span>
+                      <span className={stepIndex >= 3 ? "text-[#00ff88] font-bold" : "text-white/30"}>4. Delivered</span>
+                    </div>
+                    <div className="w-full bg-white/10 h-1.5 rounded-full overflow-hidden flex">
+                      <div 
+                        className="bg-gradient-to-r from-[#c5a059] to-[#00ff88] h-full transition-all duration-500" 
+                        style={{ width: `${((stepIndex + 1) / 4) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
                 {order.items && order.items.length > 0 && (
                   <div className="mb-6 space-y-2">
                     {order.items.map((item: any, idx: number) => (
-                      <div key={idx} className="flex justify-between items-center text-xs bg-black/30 p-2.5 border border-white/5">
+                      <div key={idx} className="flex justify-between items-center text-xs bg-black/30 p-3 border border-white/5">
                         <div className="flex flex-col">
-                          <span className="text-white/90 font-medium">{item.product?.name}</span>
-                          <span className="text-[10px] text-white/40 uppercase tracking-widest">{item.variant?.volume} • {item.variant?.packaging}</span>
+                          <span className="text-white/90 font-medium font-serif">{item.product?.name}</span>
+                          <span className="text-[10px] text-white/40 uppercase tracking-widest font-mono">{item.variant?.volume} • {item.variant?.packaging}</span>
                         </div>
                         <div className="flex items-center gap-3">
-                          <div className="text-right">
-                            <span className="text-[#c5a059]">{item.quantity}x</span>
+                          <div className="text-right font-mono">
+                            <span className="text-[#c5a059] font-bold">{item.quantity}x</span>
                             <span className="text-white/40 text-[10px] ml-2">@ KES {Number(item.priceAtPurchase).toLocaleString()}</span>
                           </div>
                           {order.status === 'DELIVERED' && item.product && (

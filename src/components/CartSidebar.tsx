@@ -207,17 +207,34 @@ export const CartSidebar = () => {
         "fixed top-0 right-0 h-full w-full md:w-[450px] bg-[#0a0a0a] border-l border-white/5 z-50 transform transition-transform duration-300 flex flex-col shadow-2xl",
         isOpen ? "translate-x-0" : "translate-x-full"
       )}>
-        <div className="p-6 border-b border-white/5 flex justify-between items-center bg-[#0a0a0a]">
+        <div className="p-6 border-b border-white/10 flex justify-between items-center bg-[#0a0a0a]">
           {step !== 'CART' ? (
-            <button onClick={() => setStep(step === 'PAYMENT' ? 'DELIVERY' : 'CART')} className="text-white/50 hover:text-white flex items-center gap-2 text-xs uppercase tracking-widest">
+            <button 
+              onClick={() => setStep(step === 'PAYMENT' ? 'DELIVERY' : 'CART')} 
+              className="text-white/60 hover:text-white flex items-center gap-2 text-xs uppercase tracking-widest transition-colors py-1"
+            >
               <ArrowLeft size={16} /> Back
             </button>
           ) : (
-            <h2 className="text-sm tracking-[0.2em] font-serif uppercase text-[#c5a059] flex items-center gap-2">
+            <h2 className="text-sm tracking-[0.25em] font-serif uppercase text-[#c5a059] flex items-center gap-2">
               <ShoppingBag size={16} /> Your Reserve
             </h2>
           )}
-          <button onClick={toggleCart} className="text-white/50 hover:text-white transition-colors">
+          
+          {/* Progress Indicator */}
+          <div className="flex items-center gap-1 text-[9px] font-mono uppercase tracking-widest text-white/40">
+            <span className={clsx("px-1.5 py-0.5 rounded-xs transition-colors", step === 'CART' ? "text-[#c5a059] font-bold bg-[#c5a059]/10" : "text-white/30")}>1. Cart</span>
+            <span>›</span>
+            <span className={clsx("px-1.5 py-0.5 rounded-xs transition-colors", step === 'DELIVERY' ? "text-[#c5a059] font-bold bg-[#c5a059]/10" : "text-white/30")}>2. Delivery</span>
+            <span>›</span>
+            <span className={clsx("px-1.5 py-0.5 rounded-xs transition-colors", step === 'PAYMENT' ? "text-[#c5a059] font-bold bg-[#c5a059]/10" : "text-white/30")}>3. Pay</span>
+          </div>
+
+          <button 
+            onClick={toggleCart} 
+            className="text-white/50 hover:text-white transition-colors p-1 rounded-sm hover:bg-white/5"
+            aria-label="Close cart"
+          >
             <X size={20} />
           </button>
         </div>
@@ -225,108 +242,140 @@ export const CartSidebar = () => {
         <div className="flex-1 overflow-y-auto p-6 space-y-6">
           {step === 'CART' && (
             items.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center opacity-50">
-                <ShoppingBag size={48} className="mb-4 text-[#c5a059]" />
-                <p className="text-sm font-serif">Your reserve is empty</p>
+              <div className="h-full flex flex-col items-center justify-center text-center py-16">
+                <div className="w-16 h-16 rounded-full bg-[#c5a059]/10 border border-[#c5a059]/20 flex items-center justify-center mb-4">
+                  <ShoppingBag size={28} className="text-[#c5a059]" />
+                </div>
+                <h3 className="text-base font-serif text-white mb-2">Your Reserve is Empty</h3>
+                <p className="text-xs text-white/50 max-w-xs mb-6 font-serif">Explore our handcrafted Kakamega reserve vintages and botanical elixirs.</p>
+                <button
+                  onClick={toggleCart}
+                  className="px-6 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 text-[#c5a059] hover:text-white text-xs uppercase tracking-widest font-mono transition-colors"
+                >
+                  Explore Collection
+                </button>
               </div>
             ) : (
-              items.map((item) => (
-                <div key={item.variantId} className="flex gap-4 border-b border-white/5 pb-6">
-                  <div className="w-16 h-20 bg-[#111] border border-white/5 flex items-center justify-center shrink-0">
-                    <span className="text-[8px] tracking-widest text-[#c5a059] -rotate-90">MRATINA</span>
-                  </div>
-                  <div className="flex-1 flex flex-col justify-between">
-                    <div>
-                      <h3 className="text-sm font-serif">{item.name}</h3>
-                      <p className="text-[10px] text-white/50 uppercase tracking-wider">{item.volume}</p>
+              <div className="space-y-4">
+                {items.map((item) => (
+                  <div key={item.variantId} className="flex gap-4 border-b border-white/5 pb-5 group">
+                    <div className="w-16 h-20 bg-gradient-to-b from-[#1a1a1a] to-[#0d0d0d] border border-white/10 flex items-center justify-center shrink-0 shadow-inner">
+                      <span className="text-[8px] tracking-[0.25em] text-[#c5a059] -rotate-90 font-mono font-bold">MRATINA</span>
                     </div>
-                    <div className="flex justify-between items-end mt-4">
-                      <div className="flex items-center gap-3 border border-white/10 px-2 py-1">
-                        <button onClick={() => item.quantity > 1 ? updateQuantity(item.variantId, item.quantity - 1) : removeItem(item.variantId)} className="text-white/50 hover:text-white"><Minus size={12} /></button>
-                        <span className="text-xs">{item.quantity}</span>
-                        <button onClick={() => updateQuantity(item.variantId, item.quantity + 1)} className="text-white/50 hover:text-white"><Plus size={12} /></button>
+                    <div className="flex-1 flex flex-col justify-between">
+                      <div>
+                        <h3 className="text-sm font-serif text-white group-hover:text-[#c5a059] transition-colors">{item.name}</h3>
+                        <p className="text-[10px] text-white/40 uppercase tracking-widest font-mono mt-0.5">{item.volume}</p>
                       </div>
-                      <span className="text-sm text-[#c5a059]">KES {(item.price * item.quantity).toLocaleString()}</span>
+                      <div className="flex justify-between items-end mt-3">
+                        <div className="flex items-center gap-3 border border-white/10 bg-white/[0.02] px-2.5 py-1">
+                          <button 
+                            onClick={() => item.quantity > 1 ? updateQuantity(item.variantId, item.quantity - 1) : removeItem(item.variantId)} 
+                            className="text-white/40 hover:text-white transition-colors p-1"
+                            aria-label="Decrease quantity"
+                          >
+                            <Minus size={12} />
+                          </button>
+                          <span className="text-xs font-mono font-bold text-white min-w-4 text-center">{item.quantity}</span>
+                          <button 
+                            onClick={() => updateQuantity(item.variantId, item.quantity + 1)} 
+                            className="text-white/40 hover:text-white transition-colors p-1"
+                            aria-label="Increase quantity"
+                          >
+                            <Plus size={12} />
+                          </button>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sm font-mono font-medium text-[#c5a059]">KES {(item.price * item.quantity).toLocaleString()}</span>
+                          {item.quantity > 1 && (
+                            <span className="block text-[9px] text-white/30 font-mono">KES {item.price.toLocaleString()} each</span>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))
+                ))}
+              </div>
             )
           )}
 
           {step === 'DELIVERY' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="flex items-center gap-3 mb-8">
-                <div className="w-8 h-8 rounded-full bg-[#c5a059]/10 flex items-center justify-center">
+              <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+                <div className="w-9 h-9 rounded-full bg-[#c5a059]/10 border border-[#c5a059]/30 flex items-center justify-center">
                   <MapPin size={16} className="text-[#c5a059]" />
                 </div>
                 <div>
-                  <h3 className="text-xs uppercase tracking-widest text-[#c5a059]">Delivery Details</h3>
-                  <p className="text-[10px] text-white/50 uppercase tracking-widest">Where should we deliver?</p>
+                  <h3 className="text-xs uppercase tracking-widest text-[#c5a059] font-bold">Delivery Details</h3>
+                  <p className="text-[10px] text-white/50 font-serif">Kakamega Town & Serviceable Zones</p>
                 </div>
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Delivery Zone *</label>
+                <label className="block text-[10px] uppercase tracking-widest text-white/60 mb-2 font-mono">Delivery Zone *</label>
                 {fetchingZones ? (
-                  <div className="w-full bg-[#111] border border-white/10 text-white/50 p-3 text-sm flex items-center justify-center">
-                    Loading zones...
+                  <div className="w-full bg-[#111] border border-white/10 text-white/50 p-3.5 text-xs flex items-center justify-center font-mono">
+                    <span className="w-3.5 h-3.5 border-t border-[#c5a059] rounded-full animate-spin mr-2"></span> Loading active zones...
                   </div>
                 ) : availableZones.length === 0 ? (
-                  <div className="w-full bg-red-950/20 border border-red-500/30 text-red-400 p-3 text-[10px] uppercase tracking-widest leading-relaxed">
-                    No active delivery zones available right now. We cannot process orders at this time.
+                  <div className="w-full bg-red-950/30 border border-red-500/40 text-red-300 p-3 text-[11px] font-mono leading-relaxed">
+                    No active delivery zones available right now.
                   </div>
                 ) : (
                   <select 
                     value={zoneId}
                     onChange={(e) => setZoneId(e.target.value)}
-                    className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
+                    className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059] transition-colors cursor-pointer"
                   >
-                    <option value="" disabled>Select your zone...</option>
+                    <option value="" disabled>Select your delivery zone...</option>
                     {availableZones.map(z => (
-                      <option key={z.id} value={z.id}>{z.name} - KES {Number(z.fee)}</option>
+                      <option key={z.id} value={z.id}>
+                        {z.name} — KES {Number(z.fee).toLocaleString()}
+                      </option>
                     ))}
                   </select>
                 )}
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Location / Address *</label>
+                <label className="block text-[10px] uppercase tracking-widest text-white/60 mb-2 font-mono">Delivery Address / Building *</label>
                 <input 
                   type="text" 
                   value={address}
                   onChange={(e) => setAddress(e.target.value)}
-                  placeholder="e.g. 5th Floor, Kibo Tower"
-                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
+                  placeholder="e.g. Mega Mall Building, 2nd Floor, Suite 14"
+                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059] transition-colors placeholder:text-white/20"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Landmark</label>
+                <label className="block text-[10px] uppercase tracking-widest text-white/60 mb-2 font-mono">Nearby Landmark (Optional)</label>
                 <input 
                   type="text" 
                   value={landmark}
                   onChange={(e) => setLandmark(e.target.value)}
-                  placeholder="e.g. Opposite the red gate"
-                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
+                  placeholder="e.g. Next to Kakamega Primary / Near Total Energies"
+                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059] transition-colors placeholder:text-white/20"
                 />
               </div>
 
               <div>
-                <label className="block text-[10px] uppercase tracking-widest text-white/40 mb-2">Special Instructions</label>
+                <label className="block text-[10px] uppercase tracking-widest text-white/60 mb-2 font-mono">Courier Instructions (Optional)</label>
                 <textarea 
                   value={instructions}
                   onChange={(e) => setInstructions(e.target.value)}
-                  placeholder="e.g. Leave at reception"
-                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059] h-24 resize-none"
+                  placeholder="e.g. Please ring doorbell or call upon arrival at gate"
+                  className="w-full bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059] transition-colors h-20 resize-none placeholder:text-white/20"
                 />
               </div>
               
-              <div className="p-4 bg-white/5 border border-white/10 flex items-start gap-3">
+              <div className="p-4 bg-white/[0.02] border border-[#c5a059]/20 flex items-start gap-3">
                  <MapPin size={16} className="text-[#c5a059] shrink-0 mt-0.5" />
                  <div>
-                   <span className="block text-xs text-white mb-1">Zone Delivery</span>
-                   <span className="block text-[10px] text-white/50 leading-relaxed">Delivery fee is KES {authoritativeDeliveryFee}. Our concierge will contact you upon arrival.</span>
+                   <span className="block text-xs font-serif text-white mb-0.5">Concierge Cellar Dispatch</span>
+                   <span className="block text-[10px] text-white/50 leading-relaxed font-sans">
+                     Delivery fee is <strong className="text-white font-mono">KES {authoritativeDeliveryFee.toLocaleString()}</strong>. Our courier coordinates dispatch directly with your contact.
+                   </span>
                  </div>
               </div>
             </div>
@@ -334,33 +383,59 @@ export const CartSidebar = () => {
 
           {step === 'PAYMENT' && (
             <div className="space-y-6 animate-in fade-in slide-in-from-right-4 duration-300">
-              <div className="flex items-center gap-3 mb-8">
-                <div className="w-8 h-8 rounded-full bg-[#c5a059]/10 flex items-center justify-center">
+              <div className="flex items-center gap-3 pb-4 border-b border-white/5">
+                <div className="w-9 h-9 rounded-full bg-[#c5a059]/10 border border-[#c5a059]/30 flex items-center justify-center">
                   <CreditCard size={16} className="text-[#c5a059]" />
                 </div>
                 <div>
-                  <h3 className="text-xs uppercase tracking-widest text-[#c5a059]">Payment Method</h3>
-                  <p className="text-[10px] text-white/50 uppercase tracking-widest">Mobile Money</p>
+                  <h3 className="text-xs uppercase tracking-widest text-[#c5a059] font-bold">Payment Method</h3>
+                  <p className="text-[10px] text-white/50 font-serif">M-Pesa Express & Mobile Money</p>
                 </div>
               </div>
 
-              <div className="p-6 border border-[#c5a059]/30 bg-[#c5a059]/5 relative overflow-hidden">
-                <div className="absolute top-0 right-0 p-4 opacity-10">
-                  <CreditCard size={64} />
+              <div className="p-6 border border-[#c5a059]/30 bg-gradient-to-br from-[#1c160c] via-[#120f08] to-[#0a0a0a] relative overflow-hidden shadow-xl">
+                <div className="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+                  <CreditCard size={96} />
                 </div>
-                <h4 className="text-sm font-serif mb-4 relative z-10">M-Pesa Express</h4>
-                <label className="block text-[10px] uppercase tracking-widest text-[#c5a059]/80 mb-2 relative z-10">Phone Number *</label>
-                <div className="flex relative z-10">
-                  <span className="bg-[#111] border border-white/10 border-r-0 text-white/50 p-3 text-sm flex items-center">+254</span>
+                
+                <div className="flex items-center justify-between mb-4 relative z-10">
+                  <h4 className="text-sm font-serif text-white font-medium">M-Pesa STK Push</h4>
+                  <span className="text-[9px] font-mono text-[#00ff88] bg-[#00ff88]/10 border border-[#00ff88]/20 px-2 py-0.5 uppercase tracking-wider">
+                    Instant
+                  </span>
+                </div>
+
+                <label className="block text-[10px] uppercase tracking-widest text-[#c5a059]/90 mb-2 relative z-10 font-mono">
+                  Safaricom M-Pesa Phone Number *
+                </label>
+                <div className="flex relative z-10 shadow-inner">
+                  <span className="bg-[#111] border border-white/15 border-r-0 text-white/60 px-3.5 text-xs font-mono flex items-center select-none">
+                    +254
+                  </span>
                   <input 
                     type="tel" 
                     value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
+                    onChange={(e) => setPhone(e.target.value.replace(/[^0-9]/g, ''))}
                     placeholder="712 345 678"
-                    className="flex-1 bg-[#111] border border-white/10 text-white p-3 text-sm focus:outline-none focus:border-[#c5a059]"
+                    maxLength={10}
+                    className="flex-1 bg-[#111] border border-white/15 text-white p-3 text-sm font-mono focus:outline-none focus:border-[#c5a059] transition-colors"
                   />
                 </div>
-                <p className="text-[10px] text-white/40 mt-3 relative z-10">You will receive an STK prompt on your phone to complete the payment securely.</p>
+                
+                <p className="text-[11px] text-white/50 mt-3 relative z-10 leading-relaxed font-serif">
+                  You will receive a secure PIN prompt on your phone to complete <strong className="text-white font-mono">KES {finalTotal.toLocaleString()}</strong>.
+                </p>
+              </div>
+
+              <div className="p-4 bg-white/[0.02] border border-white/5 text-[11px] text-white/40 space-y-1 font-mono">
+                <div className="flex justify-between">
+                  <span>Subtotal ({items.reduce((s, i) => s + i.quantity, 0)} items)</span>
+                  <span className="text-white">KES {total.toLocaleString()}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Delivery to {availableZones.find(z => z.id.toString() === zoneId)?.name || 'Selected Zone'}</span>
+                  <span className="text-white">KES {authoritativeDeliveryFee.toLocaleString()}</span>
+                </div>
               </div>
             </div>
           )}
