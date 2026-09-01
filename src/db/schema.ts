@@ -476,3 +476,47 @@ export const productViewsRelations = relations(productViews, ({ one }) => ({
     references: [users.id],
   }),
 }));
+
+// Payment Configurations (Module 24 - Secure Runtime M-Pesa & Provider Config for Client Handover)
+export const paymentConfigurations = pgTable('payment_configurations', {
+  id: serial('id').primaryKey(),
+  provider: text('provider').notNull().unique(), // 'M-PESA', 'AIRTEL_MONEY'
+  consumerKey: text('consumer_key'), // Server-side secure credentials
+  consumerSecret: text('consumer_secret'), // Server-side secure credentials
+  passkey: text('passkey'), // Server-side secure credentials
+  shortcode: text('shortcode'), // e.g. "174379"
+  callbackUrl: text('callback_url'), // Webhook URL
+  environment: text('environment').default('SANDBOX').notNull(), // 'SANDBOX' | 'PRODUCTION'
+  isActive: boolean('is_active').default(true).notNull(),
+  updatedBy: integer('updated_by').references(() => users.id),
+  createdAt: timestamp('created_at').defaultNow(),
+  updatedAt: timestamp('updated_at').defaultNow(),
+});
+
+// Payment Config Audit Logs (Track credential updates without saving secrets in audit logs)
+export const paymentConfigAuditLogs = pgTable('payment_config_audit_logs', {
+  id: serial('id').primaryKey(),
+  provider: text('provider').notNull(),
+  actorId: integer('actor_id').references(() => users.id),
+  actorRole: text('actor_role').notNull().default('ADMIN'),
+  action: text('action').notNull(), // 'M_PESA_CONFIGURATION_CREATED', 'M_PESA_CONFIGURATION_UPDATED', 'M_PESA_CONFIGURATION_TESTED'
+  fieldsModified: jsonb('fields_modified'), // e.g. ["consumerKey", "shortcode"] without secret values
+  environment: text('environment'),
+  details: text('details'),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+export const paymentConfigurationsRelations = relations(paymentConfigurations, ({ one }) => ({
+  updater: one(users, {
+    fields: [paymentConfigurations.updatedBy],
+    references: [users.id],
+  }),
+}));
+
+export const paymentConfigAuditLogsRelations = relations(paymentConfigAuditLogs, ({ one }) => ({
+  actor: one(users, {
+    fields: [paymentConfigAuditLogs.actorId],
+    references: [users.id],
+  }),
+}));
+

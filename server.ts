@@ -15,6 +15,7 @@ import { refundService } from "./src/services/refundService.ts";
 import { supportService } from "./src/services/supportService.ts";
 import { notificationService } from "./src/services/notificationService.ts";
 import { analyticsService } from "./src/services/analyticsService.ts";
+import { paymentConfigService } from "./src/services/paymentConfigService.ts";
 
 async function startServer() {
   const app = express();
@@ -1911,6 +1912,95 @@ async function startServer() {
        console.error("Simulation failed:", e);
        res.status(500).json({ error: "Simulation failed" });
      }
+  });
+
+  // =========================================================================
+  // ADMIN M-PESA RUNTIME PAYMENT CONFIGURATION (FOR SECURE CLIENT HANDOVER)
+  // =========================================================================
+
+  // Admin: Get public/masked M-Pesa configuration metadata (NEVER returns raw secrets)
+  app.get("/api/admin/payments/mpesa-config", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const config = await paymentConfigService.getPublicMpesaConfig();
+      res.json({ success: true, config });
+    } catch (error: any) {
+      console.error("[PaymentConfig] Failed to fetch M-Pesa config:", error);
+      res.status(500).json({ error: "Failed to fetch M-Pesa gateway configuration" });
+    }
+  });
+
+  // Admin: Save or Update M-Pesa configuration
+  app.post("/api/admin/payments/mpesa-config", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const { consumerKey, consumerSecret, passkey, shortcode, callbackUrl, environment } = req.body;
+
+      // Validate inputs
+      if (environment && !['SANDBOX', 'PRODUCTION'].includes(environment)) {
+        return res.status(400).json({ error: "Invalid environment specified. Must be SANDBOX or PRODUCTION." });
+      }
+
+      if (callbackUrl && callbackUrl.trim()) {
+        try {
+          const parsed = new URL(callbackUrl.trim());
+          if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+            return res.status(400).json({ error: "Callback URL must be a valid HTTP/HTTPS URL." });
+          }
+        } catch {
+          return res.status(400).json({ error: "Invalid Callback URL format." });
+        }
+      }
+
+      const result = await paymentConfigService.saveMpesaConfig({
+        consumerKey,
+        consumerSecret,
+        passkey,
+        shortcode,
+        callbackUrl,
+        environment: environment as 'SANDBOX' | 'PRODUCTION',
+        actorId: user.id,
+        actorRole: user.role
+      });
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[PaymentConfig] Failed to save M-Pesa config:", error);
+      res.status(500).json({ error: error.message || "Failed to update M-Pesa configuration" });
+    }
+  });
+
+  // Admin: Test Safaricom Daraja API OAuth Connectivity
+  app.post("/api/admin/payments/mpesa-config/test", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const user = await getUserByUid(req.user!.uid);
+      if (!user) return res.status(401).json({ error: "User not found" });
+
+      const { consumerKey, consumerSecret, environment } = req.body;
+
+      const result = await paymentConfigService.testMpesaConnectivity(
+        user.id,
+        user.role,
+        { consumerKey, consumerSecret, environment }
+      );
+
+      res.json(result);
+    } catch (error: any) {
+      console.error("[PaymentConfig] Connection test failure:", error);
+      res.status(500).json({ error: error.message || "Connection diagnostic failed" });
+    }
+  });
+
+  // Admin: Get M-Pesa Configuration Audit Log Trail
+  app.get("/api/admin/payments/mpesa-config/audit-logs", requireAuth, requireRole(['ADMIN']), async (req: AuthRequest, res) => {
+    try {
+      const logs = await paymentConfigService.getAuditLogs(30);
+      res.json({ success: true, logs });
+    } catch (error: any) {
+      console.error("[PaymentConfig] Audit log fetch error:", error);
+      res.status(500).json({ error: "Failed to fetch configuration audit trail" });
+    }
   });
 
   // --- REVIEWS & RATINGS API (MODULE 18) ---

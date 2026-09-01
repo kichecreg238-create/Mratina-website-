@@ -64,38 +64,218 @@ export interface PaymentProviderAdapter {
   refund(providerReference: string, amount: number): Promise<PaymentRefundResult>;
 }
 
-// Concrete Adapters (Unconfigured for now, but respecting the boundary)
+import { paymentConfigService } from './paymentConfigService.ts';
+
+// Concrete Adapters (Authoritative & Runtime-Configured)
 
 export class MpesaAdapter implements PaymentProviderAdapter {
+  private formatPhoneNumber(phone: string): string {
+    let clean = phone.replace(/[^0-9]/g, '');
+    if (clean.startsWith('0')) {
+      clean = '254' + clean.slice(1);
+    } else if (clean.startsWith('+254')) {
+      clean = clean.slice(1);
+    } else if (!clean.startsWith('254') && (clean.startsWith('7') || clean.startsWith('1'))) {
+      clean = '254' + clean;
+    }
+    return clean;
+  }
+
+  private getTimestamp(): string {
+    const date = new Date();
+    const YYYY = date.getFullYear();
+    const MM = String(date.getMonth() + 1).padStart(2, '0');
+    const DD = String(date.getDate()).padStart(2, '0');
+    const hh = String(date.getHours()).padStart(2, '0');
+    const mm = String(date.getMinutes()).padStart(2, '0');
+    const ss = String(date.getSeconds()).padStart(2, '0');
+    return `${YYYY}${MM}${DD}${hh}${mm}${ss}`;
+  }
+
+  private async getAccessToken(consumerKey: string, consumerSecret: string, environment: 'SANDBOX' | 'PRODUCTION'): Promise<string | null> {
+    const authUrl = environment === 'PRODUCTION'
+      ? 'https://api.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials'
+      : 'https://sandbox.safaricom.co.ke/oauth/v1/generate?grant_type=client_credentials';
+
+    const basicAuth = Buffer.from(`${consumerKey}:${consumerSecret}`).toString('base64');
+    const response = await fetch(authUrl, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Basic ${basicAuth}`,
+        'Accept': 'application/json'
+      }
+    });
+
+    if (!response.ok) return null;
+    const data: any = await response.json();
+    return data.access_token || null;
+  }
+
   async initiate(request: PaymentInitiationRequest): Promise<PaymentInitiationResult> {
-    // We would use M-Pesa Daraja API STK Push here.
-    return {
-      success: false,
-      isConfigured: false,
-      error: "M-Pesa integration is currently unconfigured."
-    };
+    const secrets = await paymentConfigService.getAuthoritativeMpesaSecrets();
+
+    if (!secrets.isConfigured || !secrets.consumerKey || !secrets.consumerSecret || !secrets.shortcode) {
+      return {
+        success: false,
+        isConfigured: false,
+        error: "M-Pesa payment gateway is unconfigured. Please configure M-Pesa credentials in the Admin Portal."
+      };
+    }
+
+    const formattedPhone = this.formatPhoneNumber(request.phoneNumber);
+    if (formattedPhone.length !== 12 || !formattedPhone.startsWith('254')) {
+      return {
+        success: false,
+        isConfigured: true,
+        error: "Invalid phone number format. Please provide a valid Kenyan mobile number (e.g. 0712345678 or 254712345678)."
+      };
+    }
+
+    try {
+      const accessToken = await this.getAccessToken(secrets.consumerKey, secrets.consumerSecret, secrets.environment);
+      if (!accessToken) {
+        return {
+          success: false,
+          isConfigured: true,
+          error: "Failed to authenticate with Safaricom Daraja gateway. Check Consumer Key and Consumer Secret in Admin Portal."
+        };
+      }
+
+      const timestamp = this.getTimestamp();
+      const passkey = secrets.passkey || 'bfb279f9aa9bdbcf158e97dd71a467cd2e0c893059b10f78e6b72ada1ed2c919'; // Fallback to standard Daraja sandbox passkey if empty
+      const password = Buffer.from(`${secrets.shortcode}${passkey}${timestamp}`).toString('base64');
+
+      const stkUrl = secrets.environment === 'PRODUCTION'
+        ? 'https://api.safaricom.co.ke/mpesa/stkpush/v1/processrequest'
+        : 'https://sandbox.safaricom.co.ke/mpesa/stkpush/v1/processrequest';
+
+      const callbackUrl = secrets.callbackUrl || (process.env.APP_URL ? `${process.env.APP_URL}/api/webhooks/payment/M-PESA` : 'https://example.com/api/webhooks/payment/M-PESA');
+
+      const payload = {
+        BusinessShortCode: secrets.shortcode,
+        Password: password,
+        Timestamp: timestamp,
+        TransactionType: "CustomerPayBillOnline",
+        Amount: Math.max(1, Math.round(request.amount)),
+        PartyA: formattedPhone,
+        PartyB: secrets.shortcode,
+        PhoneNumber: formattedPhone,
+        CallBackURL: callbackUrl,
+        AccountReference: `MRATINA-${request.orderId}`,
+        TransactionDesc: `Mratina Cellar Order #${request.orderId}`
+      };
+
+      const stkRes = await fetch(stkUrl, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      const stkData: any = await stkRes.json().catch(() => ({}));
+
+      if (stkRes.ok && (stkData.ResponseCode === '0' || stkData.ResponseCode === 0)) {
+        return {
+          success: true,
+          isConfigured: true,
+          providerReference: stkData.CheckoutRequestID || stkData.MerchantRequestID || `MPESA-${request.orderId}-${Date.now()}`
+        };
+      } else {
+        const errorMsg = stkData.errorMessage || stkData.CustomerMessage || stkData.ResponseDescription || "Daraja STK push dispatch rejected";
+        return {
+          success: false,
+          isConfigured: true,
+          error: `M-Pesa STK Push error: ${errorMsg}`
+        };
+      }
+    } catch (err: any) {
+      console.error('[M-Pesa] STK push execution error:', err);
+      return {
+        success: false,
+        isConfigured: true,
+        error: `M-Pesa dispatch error: ${err.message || 'Network failure connecting to gateway'}`
+      };
+    }
   }
 
   async verify(providerReference: string): Promise<PaymentVerificationResult> {
+    const secrets = await paymentConfigService.getAuthoritativeMpesaSecrets();
+    if (!secrets.isConfigured) {
+      return {
+        status: 'PENDING',
+        error: "M-Pesa verification unconfigured."
+      };
+    }
+
     return {
       status: 'PENDING',
-      error: "M-Pesa verification is currently unconfigured."
+      providerReference
     };
   }
   
   async verifyWebhook(payload: any, headers: any): Promise<PaymentWebhookVerificationResult> {
-    return {
-      success: false,
-      isConfigured: false,
-      error: "M-Pesa webhook verification is currently unconfigured."
-    };
+    const secrets = await paymentConfigService.getAuthoritativeMpesaSecrets();
+    if (!secrets.isConfigured) {
+      return {
+        success: false,
+        isConfigured: false,
+        error: "M-Pesa is not configured."
+      };
+    }
+
+    try {
+      // Safaricom Daraja STK Callback Parser
+      const stkCallback = payload?.Body?.stkCallback;
+      if (!stkCallback) {
+        return {
+          success: false,
+          isConfigured: true,
+          error: "Invalid Daraja callback structure."
+        };
+      }
+
+      const checkoutRequestId = stkCallback.CheckoutRequestID;
+      const resultCode = stkCallback.ResultCode;
+      const resultDesc = stkCallback.ResultDesc;
+
+      let receiptNumber: string | undefined = undefined;
+      let amount: number | undefined = undefined;
+
+      const items = stkCallback.CallbackMetadata?.Item;
+      if (Array.isArray(items)) {
+        for (const it of items) {
+          if (it.Name === 'MpesaReceiptNumber') receiptNumber = String(it.Value);
+          if (it.Name === 'Amount') amount = Number(it.Value);
+        }
+      }
+
+      const isSuccess = Number(resultCode) === 0;
+      const paymentState: PaymentState = isSuccess ? 'SUCCESS' : 'FAILED';
+
+      return {
+        success: true,
+        isConfigured: true,
+        status: paymentState,
+        providerReference: receiptNumber || checkoutRequestId,
+        error: isSuccess ? undefined : resultDesc
+      };
+    } catch (err: any) {
+      return {
+        success: false,
+        isConfigured: true,
+        error: `Webhook parsing error: ${err.message}`
+      };
+    }
   }
 
   async refund(providerReference: string, amount: number): Promise<PaymentRefundResult> {
     return {
       success: false,
       isConfigured: false,
-      error: "M-Pesa refund is currently unconfigured."
+      error: "Automated M-Pesa refund API requires B2C credentials. Handled via admin manual disbursement."
     };
   }
 }

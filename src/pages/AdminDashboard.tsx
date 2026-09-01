@@ -43,6 +43,7 @@ import { AdminRefundsPanel } from '../components/AdminRefundsPanel.tsx';
 import { AdminSupportPanel } from '../components/AdminSupportPanel.tsx';
 import { AdminAnalyticsPanel } from '../components/AdminAnalyticsPanel.tsx';
 import { AdminNotificationsPanel } from '../components/AdminNotificationsPanel.tsx';
+import { AdminMpesaConfigPanel } from '../components/AdminMpesaConfigPanel.tsx';
 
 export type AdminTab =
   | 'OVERVIEW'
@@ -89,6 +90,7 @@ export const AdminDashboard = () => {
   // Payments Tab Filters
   const [paymentProviderFilter, setPaymentProviderFilter] = useState<string>('ALL');
   const [paymentStateFilter, setPaymentStateFilter] = useState<string>('ALL');
+  const [paymentSubTab, setPaymentSubTab] = useState<'AUDIT' | 'MPESA_CONFIG'>('AUDIT');
 
   // Audit Tab Filters
   const [auditActionFilter, setAuditActionFilter] = useState<string>('ALL');
@@ -1445,96 +1447,127 @@ export const AdminDashboard = () => {
 
         {/* 7. PAYMENTS TAB */}
         {activeTab === 'PAYMENTS' && (
-          <div className="space-y-4">
-            <div className="p-4 border border-white/10 bg-[#0d0d0d] flex flex-col sm:flex-row items-center justify-between gap-4">
-              <div>
-                <h2 className="text-sm font-semibold tracking-wider font-mono uppercase text-white">Payment Audit Records</h2>
-                <p className="text-xs text-white/40">Verified gateway logs and provider transaction references.</p>
-              </div>
-
-              <div className="flex items-center space-x-2">
-                <select
-                  value={paymentProviderFilter}
-                  onChange={(e) => setPaymentProviderFilter(e.target.value)}
-                  className="bg-black border border-white/10 px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#c5a059]"
-                >
-                  <option value="ALL">Provider: All</option>
-                  <option value="M-PESA">M-PESA</option>
-                  <option value="AIRTEL_MONEY">AIRTEL_MONEY</option>
-                </select>
-
-                <select
-                  value={paymentStateFilter}
-                  onChange={(e) => setPaymentStateFilter(e.target.value)}
-                  className="bg-black border border-white/10 px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#c5a059]"
-                >
-                  <option value="ALL">State: All</option>
-                  <option value="SUCCESS">SUCCESS</option>
-                  <option value="PENDING">PENDING</option>
-                  <option value="INITIATED">INITIATED</option>
-                  <option value="FAILED">FAILED</option>
-                </select>
-              </div>
+          <div className="space-y-6">
+            {/* Sub-Navigation */}
+            <div className="flex items-center space-x-2 border-b border-white/10 pb-3">
+              <button
+                onClick={() => setPaymentSubTab('AUDIT')}
+                className={`px-4 py-2 text-xs font-mono uppercase tracking-wider transition-all border ${
+                  paymentSubTab === 'AUDIT'
+                    ? 'bg-[#c5a059] text-black border-[#c5a059] font-bold'
+                    : 'bg-white/5 text-white/70 border-white/10 hover:border-white/30 hover:text-white'
+                }`}
+              >
+                Payment Ledger & Audit Records
+              </button>
+              <button
+                onClick={() => setPaymentSubTab('MPESA_CONFIG')}
+                className={`flex items-center space-x-2 px-4 py-2 text-xs font-mono uppercase tracking-wider transition-all border ${
+                  paymentSubTab === 'MPESA_CONFIG'
+                    ? 'bg-[#c5a059] text-black border-[#c5a059] font-bold'
+                    : 'bg-white/5 text-white/70 border-white/10 hover:border-white/30 hover:text-white'
+                }`}
+              >
+                <Lock className="w-3.5 h-3.5" />
+                <span>M-Pesa Runtime Gateway Config</span>
+              </button>
             </div>
 
-            <div className="border border-white/10 bg-[#0d0d0d] overflow-x-auto">
-              <table className="w-full text-left text-xs border-collapse">
-                <thead>
-                  <tr className="border-b border-white/10 bg-white/[0.02] text-white/50 font-mono uppercase text-[10px]">
-                    <th className="p-3">Payment ID</th>
-                    <th className="p-3">Linked Order</th>
-                    <th className="p-3">Customer</th>
-                    <th className="p-3">Provider</th>
-                    <th className="p-3">Provider Ref / Receipt</th>
-                    <th className="p-3">Amount</th>
-                    <th className="p-3">Status</th>
-                    <th className="p-3">Timestamp</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-white/5 font-mono text-[11px]">
-                  {filteredPayments.length > 0 ? (
-                    filteredPayments.map(p => (
-                      <tr key={p.id} className="hover:bg-white/[0.02]">
-                        <td className="p-3 text-white font-bold">#{p.id}</td>
-                        <td className="p-3">
-                          <button
-                            onClick={() => {
-                              setActiveTab('ORDERS');
-                              openOrderOperations(p.orderId);
-                            }}
-                            className="text-[#c5a059] hover:underline font-bold"
-                          >
-                            Order #{p.orderId}
-                          </button>
-                        </td>
-                        <td className="p-3 text-white/80 font-sans text-xs">{p.customerEmail || 'Guest'}</td>
-                        <td className="p-3 text-white/70">{p.provider}</td>
-                        <td className="p-3 text-white/60 font-mono">{p.providerReference || 'Pending verification'}</td>
-                        <td className="p-3 text-emerald-400 font-bold">KES {Number(p.amount).toFixed(2)}</td>
-                        <td className="p-3">
-                          <span className={`px-2 py-0.5 text-[9px] border ${
-                            p.status === 'SUCCESS' ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30' :
-                            p.status === 'FAILED' ? 'bg-red-950/40 text-red-400 border-red-500/30' :
-                            'bg-amber-950/40 text-amber-300 border-amber-500/30'
-                          }`}>
-                            {p.status}
-                          </span>
-                        </td>
-                        <td className="p-3 text-white/40 text-[10px]">
-                          {new Date(p.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                        </td>
+            {paymentSubTab === 'MPESA_CONFIG' ? (
+              <AdminMpesaConfigPanel />
+            ) : (
+              <div className="space-y-4">
+                <div className="p-4 border border-white/10 bg-[#0d0d0d] flex flex-col sm:flex-row items-center justify-between gap-4">
+                  <div>
+                    <h2 className="text-sm font-semibold tracking-wider font-mono uppercase text-white">Payment Audit Records</h2>
+                    <p className="text-xs text-white/40">Verified gateway logs and provider transaction references.</p>
+                  </div>
+
+                  <div className="flex items-center space-x-2">
+                    <select
+                      value={paymentProviderFilter}
+                      onChange={(e) => setPaymentProviderFilter(e.target.value)}
+                      className="bg-black border border-white/10 px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#c5a059]"
+                    >
+                      <option value="ALL">Provider: All</option>
+                      <option value="M-PESA">M-PESA</option>
+                      <option value="AIRTEL_MONEY">AIRTEL_MONEY</option>
+                    </select>
+
+                    <select
+                      value={paymentStateFilter}
+                      onChange={(e) => setPaymentStateFilter(e.target.value)}
+                      className="bg-black border border-white/10 px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-[#c5a059]"
+                    >
+                      <option value="ALL">State: All</option>
+                      <option value="SUCCESS">SUCCESS</option>
+                      <option value="PENDING">PENDING</option>
+                      <option value="INITIATED">INITIATED</option>
+                      <option value="FAILED">FAILED</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="border border-white/10 bg-[#0d0d0d] overflow-x-auto">
+                  <table className="w-full text-left text-xs border-collapse">
+                    <thead>
+                      <tr className="border-b border-white/10 bg-white/[0.02] text-white/50 font-mono uppercase text-[10px]">
+                        <th className="p-3">Payment ID</th>
+                        <th className="p-3">Linked Order</th>
+                        <th className="p-3">Customer</th>
+                        <th className="p-3">Provider</th>
+                        <th className="p-3">Provider Ref / Receipt</th>
+                        <th className="p-3">Amount</th>
+                        <th className="p-3">Status</th>
+                        <th className="p-3">Timestamp</th>
                       </tr>
-                    ))
-                  ) : (
-                    <tr>
-                      <td colSpan={8} className="p-8 text-center text-white/40 font-sans text-xs">
-                        No payment records matching the selected filters.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
+                    </thead>
+                    <tbody className="divide-y divide-white/5 font-mono text-[11px]">
+                      {filteredPayments.length > 0 ? (
+                        filteredPayments.map(p => (
+                          <tr key={p.id} className="hover:bg-white/[0.02]">
+                            <td className="p-3 text-white font-bold">#{p.id}</td>
+                            <td className="p-3">
+                              <button
+                                onClick={() => {
+                                  setActiveTab('ORDERS');
+                                  openOrderOperations(p.orderId);
+                                }}
+                                className="text-[#c5a059] hover:underline font-bold"
+                              >
+                                Order #{p.orderId}
+                              </button>
+                            </td>
+                            <td className="p-3 text-white/80 font-sans text-xs">{p.customerEmail || 'Guest'}</td>
+                            <td className="p-3 text-white/70">{p.provider}</td>
+                            <td className="p-3 text-white/60 font-mono">{p.providerReference || 'Pending verification'}</td>
+                            <td className="p-3 text-emerald-400 font-bold">KES {Number(p.amount).toFixed(2)}</td>
+                            <td className="p-3">
+                              <span className={`px-2 py-0.5 text-[9px] border ${
+                                p.status === 'SUCCESS' ? 'bg-emerald-950/40 text-emerald-400 border-emerald-500/30' :
+                                p.status === 'FAILED' ? 'bg-red-950/40 text-red-400 border-red-500/30' :
+                                'bg-amber-950/40 text-amber-300 border-amber-500/30'
+                              }`}>
+                                {p.status}
+                              </span>
+                            </td>
+                            <td className="p-3 text-white/40 text-[10px]">
+                              {new Date(p.createdAt).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={8} className="p-8 text-center text-white/40 font-sans text-xs">
+                            No payment records matching the selected filters.
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
