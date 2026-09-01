@@ -39,7 +39,7 @@ export default function App() {
         </aside>
 
         {/* Main Content Area */}
-        <div className="flex-1 relative flex flex-col h-full overflow-hidden mt-16 md:mt-0">
+        <div className="flex-1 min-w-0 relative flex flex-col h-full overflow-hidden mt-16 md:mt-0">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/orders" element={<OrderHistory />} />

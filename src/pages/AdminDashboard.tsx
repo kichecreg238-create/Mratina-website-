@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAuthStore } from '../store/useAuthStore.ts';
 import { Navigate } from 'react-router-dom';
 import {
@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Plus,
   Edit2,
+  ChevronLeft,
   ChevronRight,
   AlertCircle,
   Check,
@@ -80,6 +81,43 @@ export const AdminDashboard = () => {
   const [lastRefreshed, setLastRefreshed] = useState<string>('');
   const [updatingId, setUpdatingId] = useState<number | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // Navigation Scrolling State & Ref
+  const navContainerRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const checkNavScroll = () => {
+    const el = navContainerRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 5);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 5);
+  };
+
+  useEffect(() => {
+    checkNavScroll();
+    const handleResize = () => checkNavScroll();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, [orders.length, products.length, paymentsList.length, auditLogsList.length]);
+
+  useEffect(() => {
+    // Automatically bring active tab into view smoothly
+    const tabEl = document.getElementById(`admin-tab-${activeTab}`);
+    if (tabEl && navContainerRef.current) {
+      tabEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'nearest' });
+    }
+    checkNavScroll();
+  }, [activeTab]);
+
+  const handleNavScroll = (direction: 'left' | 'right') => {
+    if (!navContainerRef.current) return;
+    const scrollAmount = 280;
+    navContainerRef.current.scrollBy({
+      left: direction === 'left' ? -scrollAmount : scrollAmount,
+      behavior: 'smooth'
+    });
+  };
 
   // Orders Tab Filters
   const [orderStatusFilter, setOrderStatusFilter] = useState<string>('ALL');
@@ -637,7 +675,7 @@ export const AdminDashboard = () => {
   );
 
   return (
-    <div className="flex-1 flex flex-col h-full bg-[#050505] text-[#e0e0e0] overflow-y-auto">
+    <div className="flex-1 min-w-0 flex flex-col h-full w-full max-w-full bg-[#050505] text-[#e0e0e0] overflow-y-auto">
       {/* Top Operational Header */}
       <header className="sticky top-0 z-30 bg-[#0a0a0a]/95 backdrop-blur border-b border-white/10 px-4 md:px-8 py-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
         <div className="flex items-center space-x-3">
@@ -683,48 +721,97 @@ export const AdminDashboard = () => {
         </div>
       </header>
 
-      {/* Navigation Tab Bar */}
-      <nav className="border-b border-white/10 bg-[#080808] px-4 md:px-8 py-2 overflow-x-auto scrollbar-none flex items-center space-x-1">
-        {[
-          { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
-          { id: 'ANALYTICS', label: 'Analytics & KPIs', icon: BarChart3 },
-          { id: 'ORDERS', label: 'Orders', icon: ShoppingBag, count: orders.length },
-          { id: 'CATALOGUE', label: 'Catalogue', icon: Package, count: products.length },
-          { id: 'PRICING', label: 'Pricing', icon: DollarSign },
-          { id: 'INVENTORY', label: 'Inventory', icon: Layers, badge: overview?.metrics?.lowStockCount ? `${overview.metrics.lowStockCount} Low` : null },
-          { id: 'DELIVERY', label: 'Delivery', icon: Truck, count: overview?.metrics?.activeDeliveries },
-          { id: 'PAYMENTS', label: 'Payments', icon: CreditCard, count: paymentsList.length },
-          { id: 'REFUNDS', label: 'Refunds', icon: RotateCcw },
-          { id: 'SUPPORT', label: 'Support / Tickets', icon: LifeBuoy },
-          { id: 'NOTIFICATIONS', label: 'Alerts Feed', icon: Bell },
-          { id: 'STAFF', label: 'Staff / Deliverers', icon: Users, count: deliverers.length },
-          { id: 'CMS', label: 'CMS & Visuals', icon: Sliders },
-          { id: 'REVIEWS', label: 'Reviews', icon: Star },
-          { id: 'AUDIT', label: 'Audit Ledger', icon: FileText, count: auditLogsList.length }
-        ].map(tab => {
-          const Icon = tab.icon;
-          const isActive = activeTab === tab.id;
-          return (
+      {/* Navigation Tab Bar Container */}
+      <div className="border-b border-white/10 bg-[#080808] w-full max-w-full min-w-0 relative z-20">
+        <div className="relative flex items-center w-full max-w-full min-w-0 px-2 md:px-4">
+          {/* Scroll Left Button */}
+          {canScrollLeft && (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id as AdminTab)}
-              className={`flex items-center space-x-2 px-3.5 py-2 text-xs font-mono tracking-wider uppercase whitespace-nowrap transition-all border-b-2 -mb-[9px] ${
-                isActive
-                  ? 'border-[#c5a059] text-white bg-white/5'
-                  : 'border-transparent text-white/50 hover:text-white/80 hover:bg-white/[0.02]'
-              }`}
+              onClick={() => handleNavScroll('left')}
+              className="absolute left-1 z-20 flex items-center justify-center w-7 h-7 bg-black/95 hover:bg-[#c5a059] text-white/80 hover:text-black border border-white/20 hover:border-[#c5a059] shadow-lg transition-all"
+              title="Scroll tabs left"
+              aria-label="Scroll tabs left"
             >
-              <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#c5a059]' : 'text-white/40'}`} />
-              <span>{tab.label}</span>
-              {tab.badge && (
-                <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-none ml-1">
-                  {tab.badge}
-                </span>
-              )}
+              <ChevronLeft className="w-4 h-4" />
             </button>
-          );
-        })}
-      </nav>
+          )}
+
+          {/* Left Fade Cue */}
+          {canScrollLeft && (
+            <div className="pointer-events-none absolute left-0 top-0 bottom-0 w-8 bg-gradient-to-r from-[#080808] to-transparent z-10" />
+          )}
+
+          {/* Tabs Navigation Track */}
+          <nav
+            ref={navContainerRef}
+            onScroll={checkNavScroll}
+            className="flex-1 flex items-center space-x-1 py-2 overflow-x-auto scroll-smooth overscroll-x-contain [scrollbar-width:thin] [scrollbar-color:#333_transparent]"
+          >
+            {[
+              { id: 'OVERVIEW', label: 'Overview', icon: LayoutDashboard },
+              { id: 'ANALYTICS', label: 'Analytics & KPIs', icon: BarChart3 },
+              { id: 'ORDERS', label: 'Orders', icon: ShoppingBag, count: orders.length },
+              { id: 'CATALOGUE', label: 'Catalogue', icon: Package, count: products.length },
+              { id: 'PRICING', label: 'Pricing', icon: DollarSign },
+              { id: 'INVENTORY', label: 'Inventory', icon: Layers, badge: overview?.metrics?.lowStockCount ? `${overview.metrics.lowStockCount} Low` : null },
+              { id: 'DELIVERY', label: 'Delivery', icon: Truck, count: overview?.metrics?.activeDeliveries },
+              { id: 'PAYMENTS', label: 'Payments', icon: CreditCard, count: paymentsList.length },
+              { id: 'REFUNDS', label: 'Refunds', icon: RotateCcw },
+              { id: 'SUPPORT', label: 'Support / Tickets', icon: LifeBuoy },
+              { id: 'NOTIFICATIONS', label: 'Alerts Feed', icon: Bell },
+              { id: 'STAFF', label: 'Staff / Deliverers', icon: Users, count: deliverers.length },
+              { id: 'CMS', label: 'CMS & Visuals', icon: Sliders },
+              { id: 'REVIEWS', label: 'Reviews', icon: Star },
+              { id: 'AUDIT', label: 'Audit Ledger', icon: FileText, count: auditLogsList.length }
+            ].map(tab => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  id={`admin-tab-${tab.id}`}
+                  onClick={() => setActiveTab(tab.id as AdminTab)}
+                  className={`shrink-0 flex items-center space-x-2 px-3.5 py-2 text-xs font-mono tracking-wider uppercase whitespace-nowrap transition-all border-b-2 -mb-[9px] ${
+                    isActive
+                      ? 'border-[#c5a059] text-white bg-white/5 font-semibold'
+                      : 'border-transparent text-white/50 hover:text-white/80 hover:bg-white/[0.02]'
+                  }`}
+                >
+                  <Icon className={`w-3.5 h-3.5 shrink-0 ${isActive ? 'text-[#c5a059]' : 'text-white/40'}`} />
+                  <span>{tab.label}</span>
+                  {tab.count !== undefined && tab.count > 0 && (
+                    <span className={`text-[9px] px-1.5 py-0.2 font-mono ${isActive ? 'bg-[#c5a059]/20 text-[#c5a059] border border-[#c5a059]/40' : 'bg-white/5 text-white/40 border border-white/10'}`}>
+                      {tab.count}
+                    </span>
+                  )}
+                  {tab.badge && (
+                    <span className="text-[9px] px-1.5 py-0.2 bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-none ml-1 font-mono">
+                      {tab.badge}
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </nav>
+
+          {/* Right Fade Cue */}
+          {canScrollRight && (
+            <div className="pointer-events-none absolute right-0 top-0 bottom-0 w-8 bg-gradient-to-l from-[#080808] to-transparent z-10" />
+          )}
+
+          {/* Scroll Right Button */}
+          {canScrollRight && (
+            <button
+              onClick={() => handleNavScroll('right')}
+              className="absolute right-1 z-20 flex items-center justify-center w-7 h-7 bg-black/95 hover:bg-[#c5a059] text-white/80 hover:text-black border border-white/20 hover:border-[#c5a059] shadow-lg transition-all"
+              title="Scroll tabs right"
+              aria-label="Scroll tabs right"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
+        </div>
+      </div>
 
       {/* Main Content Body */}
       <main className="flex-1 p-4 md:p-8 max-w-7xl w-full mx-auto space-y-6">
